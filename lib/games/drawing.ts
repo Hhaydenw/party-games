@@ -1,4 +1,4 @@
-import { GameActionError, GameDefinition, PlayerId } from "@/lib/types";
+import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/types";
 
 // A Pictionary/skribbl.io-style game: one player draws a secret word on a
 // shared canvas, everyone else races to guess it in a chat-style feed.
@@ -66,7 +66,7 @@ export interface DrawingView {
   totalRounds: number;
   wordOptions: string[] | null;
   word: string | null;
-  wordLength: number | null;
+  wordMask: string | null; // e.g. "_____ __" — underscores for letters, spaces preserved
   strokes: Stroke[];
   guesses: { id: string; playerId: PlayerId; text: string | null; correct: boolean; at: number }[];
   correctGuessers: PlayerId[];
@@ -93,6 +93,13 @@ function shuffle<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j] as T, a[i] as T];
   }
   return a;
+}
+
+function maskWord(word: string): string {
+  return word
+    .split("")
+    .map((ch) => (ch === " " ? " " : "_"))
+    .join("");
 }
 
 function pickWordOptions(used: string[]): string[] {
@@ -127,8 +134,9 @@ export const drawing: GameDefinition<DrawingState, DrawingView, DrawingAction> =
     category: "party",
     minPlayers: 3,
     maxPlayers: 10,
+    options: [{ key: "rounds", label: "Rounds", type: "number", min: 1, max: 20, default: 6 }],
   },
-  createInitialState(players) {
+  createInitialState(players, options: GameOptions) {
     const host = players.find((p) => p.isHost) ?? players[0]!;
     const order = shuffle(players.map((p) => p.id));
     const scores: Record<PlayerId, number> = {};
@@ -138,7 +146,7 @@ export const drawing: GameDefinition<DrawingState, DrawingView, DrawingAction> =
       playerIds: players.map((p) => p.id),
       order,
       roundIndex: 0,
-      totalRounds: order.length,
+      totalRounds: Number(options.rounds) || 6,
       drawerId: order[0]!,
       phase: "choosing",
       usedWords: [],
@@ -238,7 +246,7 @@ export const drawing: GameDefinition<DrawingState, DrawingView, DrawingAction> =
       return {
         ...state,
         roundIndex: nextRoundIndex,
-        drawerId: state.order[nextRoundIndex]!,
+        drawerId: state.order[nextRoundIndex % state.order.length]!,
         phase: "choosing",
         wordOptions: pickWordOptions(state.usedWords),
         word: null,
@@ -264,7 +272,7 @@ export const drawing: GameDefinition<DrawingState, DrawingView, DrawingAction> =
       totalRounds: state.totalRounds,
       wordOptions: isDrawer && state.phase === "choosing" ? state.wordOptions : null,
       word: isDrawer ? state.word : state.phase === "roundEnd" || state.phase === "finished" ? state.lastRoundReveal?.word ?? null : null,
-      wordLength: !isDrawer && state.phase === "drawing" && state.word ? state.word.length : null,
+      wordMask: !isDrawer && state.phase === "drawing" && state.word ? maskWord(state.word) : null,
       strokes: state.strokes,
       guesses: state.guesses.map((g) => ({
         id: g.id,

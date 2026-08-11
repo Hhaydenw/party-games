@@ -104,6 +104,17 @@ app.prepare().then(() => {
       }
     });
 
+    socket.on("room:setGameOptions", ({ options }) => {
+      const meta = socketMeta.get(socket.id);
+      if (!meta) return;
+      try {
+        roomManager.setGameOptions(meta.code, meta.playerId, options);
+        broadcastRoomState(io, meta.code);
+      } catch (err) {
+        socket.emit("error:message", err instanceof RoomError ? err.message : "Something went wrong.");
+      }
+    });
+
     socket.on("room:startGame", async () => {
       const meta = socketMeta.get(socket.id);
       if (!meta) return;

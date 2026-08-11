@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BluffTriviaAction, BluffTriviaView as ViewType } from "@/lib/games/bluffTrivia";
 import { PlayerInfo } from "@/lib/types";
 
@@ -19,10 +19,17 @@ export default function BluffTriviaView({
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
   const isHost = meId === view.hostId;
 
+  // Clear the input whenever a new round starts, in case the player never
+  // submitted (e.g. the host force-advanced) and stale text got left behind.
+  useEffect(() => {
+    setDraft("");
+  }, [view.roundIndex]);
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!draft.trim()) return;
     onAction({ type: "submit", text: draft.trim() });
+    setDraft("");
   }
 
   return (

@@ -6,6 +6,7 @@ import { useParty } from "@/lib/socketClient";
 import InviteLink from "@/components/InviteLink";
 import PlayerList from "@/components/PlayerList";
 import ChatBox from "@/components/ChatBox";
+import GameOptionsPanel from "@/components/GameOptionsPanel";
 
 const CATEGORY_LABEL: Record<string, string> = { card: "🃏 Card", board: "🎲 Board", party: "📱 Party" };
 
@@ -63,6 +64,8 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
               </div>
             ))}
           </div>
+
+          {selected && <GameOptionsPanel meta={selected} options={room.gameOptions} isHost={me.isHost} />}
 
           {me.isHost ? (
             <div className="mt-6 flex items-center gap-4">

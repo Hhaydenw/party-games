@@ -90,6 +90,8 @@ const GO_TO_JAIL_INDEX = 30;
 const STARTING_CASH = 1500;
 const GO_BONUS = 200;
 
+export const PIECES = ["🎩", "🚗", "🐕", "🚢", "👞", "🛒", "🧵", "🐈"];
+
 type CardEffect =
   | { kind: "collect"; amount: number }
   | { kind: "pay"; amount: number }
@@ -139,6 +141,7 @@ const CHEST_CARDS: Card[] = [
 
 interface MonopolyPlayer {
   id: PlayerId;
+  piece: string | null;
   position: number;
   cash: number;
   properties: number[];
@@ -150,7 +153,26 @@ interface MonopolyPlayer {
   bankrupt: boolean;
 }
 
-export type MonopolyPhase = "awaitingRoll" | "awaitingPropertyDecision" | "awaitingTurnEnd" | "finished";
+export type MonopolyPhase = "setup" | "awaitingRoll" | "awaitingPropertyDecision" | "auction" | "awaitingTurnEnd" | "finished";
+
+interface AuctionState {
+  propertyIndex: number;
+  highBid: number;
+  highBidderId: PlayerId | null;
+  activeBidders: PlayerId[];
+  turnIndex: number;
+}
+
+export interface TradeOffer {
+  id: string;
+  fromPlayerId: PlayerId;
+  toPlayerId: PlayerId;
+  offerProperties: number[];
+  offerCash: number;
+  requestProperties: number[];
+  requestCash: number;
+  status: "pending" | "accepted" | "rejected" | "cancelled";
+}
 
 export interface MonopolyState {
   hostId: PlayerId;
@@ -159,6 +181,8 @@ export interface MonopolyState {
   players: Record<PlayerId, MonopolyPlayer>;
   phase: MonopolyPhase;
   pendingPropertyIndex: number | null;
+  auction: AuctionState | null;
+  trades: TradeOffer[];
   lastRoll: [number, number] | null;
   doublesStreak: number;
   turnCount: number;
@@ -175,18 +199,31 @@ export interface MonopolyPropertyView {
   mortgaged: boolean;
 }
 
+export interface MonopolyAuctionView {
+  propertyIndex: number;
+  highBid: number;
+  highBidderId: PlayerId | null;
+  activeBidders: PlayerId[];
+  currentBidderId: PlayerId;
+}
+
 export interface MonopolyView {
   hostId: PlayerId;
   order: PlayerId[];
   turnIndex: number;
   yourTurn: boolean;
   phase: MonopolyPhase;
+  yourPiece: string | null;
+  availablePieces: string[];
   pendingPropertyIndex: number | null;
+  auction: MonopolyAuctionView | null;
+  trades: TradeOffer[];
   lastRoll: [number, number] | null;
   board: { type: TileDef["type"]; name: string; color?: PropertyColor; price?: number }[];
   properties: MonopolyPropertyView[];
   players: {
     id: PlayerId;
+    piece: string | null;
     position: number;
     cash: number;
     propertyCount: number;
@@ -199,17 +236,29 @@ export interface MonopolyView {
 }
 
 export type MonopolyAction =
+  | { type: "choosePiece"; piece: string }
   | { type: "roll" }
   | { type: "payBail" }
   | { type: "useJailCard" }
   | { type: "buyProperty" }
   | { type: "declineProperty" }
+  | { type: "auctionBid"; amount: number }
+  | { type: "auctionPass" }
   | { type: "buildHouse"; propertyIndex: number }
   | { type: "sellHouse"; propertyIndex: number }
   | { type: "mortgageProperty"; propertyIndex: number }
   | { type: "unmortgageProperty"; propertyIndex: number }
+  | { type: "proposeTrade"; toPlayerId: PlayerId; offerProperties: number[]; offerCash: number; requestProperties: number[]; requestCash: number }
+  | { type: "respondTrade"; tradeId: string; accept: boolean }
+  | { type: "cancelTrade"; tradeId: string }
   | { type: "endTurn" }
   | { type: "endGame" };
+
+let tradeSeq = 0;
+function nextTradeId(): string {
+  tradeSeq += 1;
+  return `trade${tradeSeq}`;
+}
 
 function isOwnable(tile: TileDef): tile is PropertyTileDef | RailroadTileDef | UtilityTileDef {
   return tile.type === "property" || tile.type === "railroad" || tile.type === "utility";
@@ -422,6 +471,7 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
     for (const p of playersIn) {
       players[p.id] = {
         id: p.id,
+        piece: null,
         position: 0,
         cash: STARTING_CASH,
         properties: [],
@@ -438,12 +488,14 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
       order,
       turnIndex: 0,
       players,
-      phase: "awaitingRoll",
+      phase: "setup",
       pendingPropertyIndex: null,
+      auction: null,
+      trades: [],
       lastRoll: null,
       doublesStreak: 0,
       turnCount: 0,
-      log: ["Game started! Everyone begins with $1,500."],
+      log: ["Pick your piece to begin! Everyone starts with $1,500."],
     };
   },
   applyAction(state, playerId, action) {
@@ -454,6 +506,128 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
       return { ...state, phase: "finished" };
     }
 
+    if (action.type === "choosePiece") {
+      if (state.phase !== "setup") throw new GameActionError("Pieces are locked in once the game starts.");
+      if (!PIECES.includes(action.piece)) throw new GameActionError("Invalid piece.");
+      const taken = Object.values(state.players).some((p) => p.piece === action.piece);
+      if (taken) throw new GameActionError("Someone already picked that piece.");
+      const players = { ...state.players, [playerId]: { ...state.players[playerId]!, piece: action.piece } };
+      const everyoneReady = state.order.every((pid) => players[pid]!.piece !== null);
+      return {
+        ...state,
+        players,
+        phase: everyoneReady ? "awaitingRoll" : "setup",
+        log: everyoneReady ? [...state.log, "Everyone's picked their piece — let's go!"] : [...state.log, `${playerId} picked ${action.piece}.`],
+      };
+    }
+
+    // Trades can be proposed, accepted, or cancelled by anyone at any time
+    // during the game (not just on your turn), matching how trading works
+    // in the real game.
+    if (action.type === "proposeTrade") {
+      if (state.phase === "setup") throw new GameActionError("Wait until the game starts.");
+      if (action.toPlayerId === playerId) throw new GameActionError("You can't trade with yourself.");
+      const other = state.players[action.toPlayerId];
+      if (!other || other.bankrupt) throw new GameActionError("Invalid trade partner.");
+      const me = state.players[playerId]!;
+      if (action.offerProperties.some((i) => !me.properties.includes(i))) throw new GameActionError("You don't own one of the offered properties.");
+      if (action.requestProperties.some((i) => !other.properties.includes(i))) throw new GameActionError("They don't own one of the requested properties.");
+      if (action.offerCash < 0 || action.requestCash < 0) throw new GameActionError("Cash amounts can't be negative.");
+      if (action.offerCash > me.cash) throw new GameActionError("You don't have that much cash to offer.");
+      const trade: TradeOffer = {
+        id: nextTradeId(),
+        fromPlayerId: playerId,
+        toPlayerId: action.toPlayerId,
+        offerProperties: action.offerProperties,
+        offerCash: action.offerCash,
+        requestProperties: action.requestProperties,
+        requestCash: action.requestCash,
+        status: "pending",
+      };
+      return { ...state, trades: [...state.trades, trade], log: [...state.log, `${playerId} proposed a trade to ${action.toPlayerId}.`] };
+    }
+
+    if (action.type === "cancelTrade") {
+      const trade = state.trades.find((t) => t.id === action.tradeId);
+      if (!trade) throw new GameActionError("Trade not found.");
+      if (trade.fromPlayerId !== playerId) throw new GameActionError("Only the proposer can cancel this trade.");
+      if (trade.status !== "pending") throw new GameActionError("That trade is no longer pending.");
+      const trades = state.trades.map((t) => (t.id === action.tradeId ? { ...t, status: "cancelled" as const } : t));
+      return { ...state, trades };
+    }
+
+    if (action.type === "respondTrade") {
+      const trade = state.trades.find((t) => t.id === action.tradeId);
+      if (!trade) throw new GameActionError("Trade not found.");
+      if (trade.toPlayerId !== playerId) throw new GameActionError("This trade isn't for you to respond to.");
+      if (trade.status !== "pending") throw new GameActionError("That trade is no longer pending.");
+      if (!action.accept) {
+        const trades = state.trades.map((t) => (t.id === action.tradeId ? { ...t, status: "rejected" as const } : t));
+        return { ...state, trades, log: [...state.log, `${playerId} declined a trade from ${trade.fromPlayerId}.`] };
+      }
+      const fromP = state.players[trade.fromPlayerId]!;
+      const toP = state.players[trade.toPlayerId]!;
+      if (trade.offerCash > fromP.cash) throw new GameActionError("The proposer no longer has enough cash for this trade.");
+      if (trade.requestCash > toP.cash) throw new GameActionError("You don't have enough cash for this trade.");
+      if (trade.offerProperties.some((i) => !fromP.properties.includes(i))) throw new GameActionError("The proposer no longer owns one of the offered properties.");
+      if (trade.requestProperties.some((i) => !toP.properties.includes(i))) throw new GameActionError("You no longer own one of the requested properties.");
+
+      const newFrom: MonopolyPlayer = {
+        ...fromP,
+        cash: fromP.cash - trade.offerCash + trade.requestCash,
+        properties: [...fromP.properties.filter((i) => !trade.offerProperties.includes(i)), ...trade.requestProperties],
+      };
+      const newTo: MonopolyPlayer = {
+        ...toP,
+        cash: toP.cash - trade.requestCash + trade.offerCash,
+        properties: [...toP.properties.filter((i) => !trade.requestProperties.includes(i)), ...trade.offerProperties],
+      };
+      const players = { ...state.players, [trade.fromPlayerId]: newFrom, [trade.toPlayerId]: newTo };
+      const trades = state.trades.map((t) => (t.id === action.tradeId ? { ...t, status: "accepted" as const } : t));
+      return { ...state, players, trades, log: [...state.log, `${trade.toPlayerId} accepted a trade with ${trade.fromPlayerId}.`] };
+    }
+
+    if (action.type === "auctionBid" || action.type === "auctionPass") {
+      if (state.phase !== "auction" || !state.auction) throw new GameActionError("No auction happening right now.");
+      const auction = state.auction;
+      const currentBidder = auction.activeBidders[auction.turnIndex % auction.activeBidders.length]!;
+      if (playerId !== currentBidder) throw new GameActionError("It's not your turn to bid.");
+      const log = [...state.log];
+
+      if (action.type === "auctionBid") {
+        if (action.amount <= auction.highBid) throw new GameActionError("Bid must be higher than the current bid.");
+        if (action.amount > state.players[playerId]!.cash) throw new GameActionError("You don't have that much cash.");
+        const nextTurnIndex = (auction.turnIndex + 1) % auction.activeBidders.length;
+        log.push(`${playerId} bids $${action.amount} on ${BOARD[auction.propertyIndex]!.name}.`);
+        return { ...state, auction: { ...auction, highBid: action.amount, highBidderId: playerId, turnIndex: nextTurnIndex }, log };
+      }
+
+      // Pass: drop out of the auction. If only one bidder remains, resolve it.
+      const remaining = auction.activeBidders.filter((id) => id !== playerId);
+      log.push(`${playerId} passes.`);
+      if (remaining.length <= 1) {
+        const winner = remaining[0] ?? auction.highBidderId;
+        let s: MonopolyState = { ...state, log };
+        if (winner && auction.highBid > 0) {
+          const tile = BOARD[auction.propertyIndex]!;
+          const winnerPlayer = s.players[winner]!;
+          s = {
+            ...s,
+            players: { ...s.players, [winner]: { ...winnerPlayer, cash: winnerPlayer.cash - auction.highBid, properties: [...winnerPlayer.properties, auction.propertyIndex] } },
+            log: [...log, `${winner} wins the auction for ${tile.name} at $${auction.highBid}.`],
+          };
+        } else {
+          s = { ...s, log: [...log, `No bids — ${BOARD[auction.propertyIndex]!.name} stays with the bank.`] };
+        }
+        const backToRollAgain = state.doublesStreak > 0 && state.lastRoll && state.lastRoll[0] === state.lastRoll[1];
+        return { ...s, auction: null, pendingPropertyIndex: null, phase: backToRollAgain ? "awaitingRoll" : "awaitingTurnEnd" };
+      }
+      const removedIndex = auction.activeBidders.indexOf(playerId);
+      const newTurnIndex = auction.turnIndex > removedIndex ? auction.turnIndex - 1 : auction.turnIndex % remaining.length;
+      return { ...state, auction: { ...auction, activeBidders: remaining, turnIndex: newTurnIndex }, log };
+    }
+
+    if (state.phase === "setup") throw new GameActionError("Waiting for everyone to pick a piece.");
     const current = state.order[state.turnIndex]!;
     if (current !== playerId) throw new GameActionError("It's not your turn.");
     const player = state.players[playerId]!;
@@ -536,17 +710,24 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
       }
       const idx = state.pendingPropertyIndex;
       const tile = BOARD[idx]!;
-      let s: MonopolyState = state;
+
       if (action.type === "buyProperty") {
         const price = priceOf(tile);
         if (player.cash < price) throw new GameActionError("Not enough cash to buy this.");
         const players = { ...state.players, [playerId]: { ...player, cash: player.cash - price, properties: [...player.properties, idx] } };
-        s = { ...state, players, log: [...log, `${playerId} bought ${tile.name} for $${price}.`] };
-      } else {
-        s = { ...state, log: [...log, `${playerId} declined to buy ${tile.name}.`] };
+        const s = { ...state, players, log: [...log, `${playerId} bought ${tile.name} for $${price}.`] };
+        const backToRollAgain = state.doublesStreak > 0 && state.lastRoll && state.lastRoll[0] === state.lastRoll[1];
+        return { ...s, pendingPropertyIndex: null, phase: backToRollAgain ? "awaitingRoll" : "awaitingTurnEnd" };
       }
-      const backToRollAgain = state.doublesStreak > 0 && state.lastRoll && state.lastRoll[0] === state.lastRoll[1];
-      return { ...s, pendingPropertyIndex: null, phase: backToRollAgain ? "awaitingRoll" : "awaitingTurnEnd" };
+
+      // Declining sends the property to auction among everyone still in the game.
+      const bidders = [...state.order.filter((id) => id !== playerId && !state.players[id]!.bankrupt), playerId];
+      return {
+        ...state,
+        phase: "auction",
+        auction: { propertyIndex: idx, highBid: 0, highBidderId: null, activeBidders: bidders, turnIndex: 0 },
+        log: [...log, `${playerId} declined to buy ${tile.name} — up for auction!`],
+      };
     }
 
     if (action.type === "buildHouse") {
@@ -625,13 +806,26 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
         mortgaged: owner ? state.players[owner]!.mortgaged.includes(index) : false,
       };
     });
+    const takenPieces = new Set(Object.values(state.players).map((p) => p.piece).filter((p): p is string => p !== null));
     return {
       hostId: state.hostId,
       order: state.order,
       turnIndex: state.turnIndex,
-      yourTurn: current === playerId && state.phase !== "finished",
+      yourTurn: current === playerId && state.phase !== "finished" && state.phase !== "setup" && state.phase !== "auction",
       phase: state.phase,
+      yourPiece: state.players[playerId]?.piece ?? null,
+      availablePieces: PIECES.filter((p) => !takenPieces.has(p)),
       pendingPropertyIndex: state.pendingPropertyIndex,
+      auction: state.auction
+        ? {
+            propertyIndex: state.auction.propertyIndex,
+            highBid: state.auction.highBid,
+            highBidderId: state.auction.highBidderId,
+            activeBidders: state.auction.activeBidders,
+            currentBidderId: state.auction.activeBidders[state.auction.turnIndex % state.auction.activeBidders.length]!,
+          }
+        : null,
+      trades: state.trades,
       lastRoll: state.lastRoll,
       board: BOARD.map((t) => ({ type: t.type, name: t.name, color: t.type === "property" ? t.color : undefined, price: isOwnable(t) ? priceOf(t) : undefined })),
       properties,
@@ -639,6 +833,7 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
         const p = state.players[pid]!;
         return {
           id: p.id,
+          piece: p.piece,
           position: p.position,
           cash: p.cash,
           propertyCount: p.properties.length,

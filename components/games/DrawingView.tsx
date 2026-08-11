@@ -196,9 +196,9 @@ export default function DrawingView({
             </div>
           )}
 
-          {!view.isDrawer && view.phase === "drawing" && (
-            <p className="text-center text-sm text-slate-400">
-              {view.wordLength ? `${view.wordLength} letters` : ""}
+          {!view.isDrawer && view.phase === "drawing" && view.wordMask && (
+            <p className="whitespace-pre text-center font-mono text-lg tracking-[0.35em] text-slate-300">
+              {view.wordMask.replace(/ /g, "   ")}
             </p>
           )}
 

@@ -1,22 +1,25 @@
 import { GameActionError, GameDefinition, PlayerId } from "@/lib/types";
 
-// A simplified digital take on The Game of Life: spin, move along a fixed
-// track, collect salary at payday spaces, and resolve whatever space you
-// land on (marriage, kids, a house, a career change, or a random life
-// event). Highest net worth when everyone reaches Retire wins.
+// A simplified digital take on The Game of Life: pick a car, spin, move
+// along a fixed track, collect salary at payday spaces, and resolve
+// whatever space you land on (marriage, kids, a house, a career change, a
+// lawsuit, the lottery, or a random life event). Highest net worth when
+// everyone reaches Retire wins.
 //
 // Simplifications vs. the physical game: no board forks (single track), no
 // stock/business spaces, no insurance, and house value doesn't fluctuate.
 
-export type LifeTileKind = "start" | "payday" | "event" | "marry" | "baby" | "house" | "career" | "neutral" | "retire";
+export type LifeTileKind = "start" | "payday" | "event" | "marry" | "baby" | "house" | "career" | "lawsuit" | "lottery" | "neutral" | "retire";
 
 const BOARD: LifeTileKind[] = [
   "start", "event", "neutral", "payday", "event", "marry", "event", "payday",
-  "career", "event", "baby", "event", "payday", "neutral", "house", "event",
-  "payday", "event", "career", "neutral", "baby", "event", "payday", "event",
-  "neutral", "payday", "event", "neutral", "event", "payday", "neutral", "event",
+  "career", "event", "baby", "lottery", "payday", "neutral", "house", "event",
+  "payday", "lawsuit", "career", "neutral", "baby", "event", "payday", "event",
+  "neutral", "payday", "lottery", "neutral", "event", "payday", "lawsuit", "event",
   "payday", "event", "neutral", "retire",
 ];
+
+export const PIECES = ["🚗", "🚙", "🚕", "🚓", "🏎️", "🚐", "🚌", "🚚"];
 
 interface CareerDef {
   title: string;
@@ -82,11 +85,27 @@ const EVENT_CARDS: EventCard[] = [
   { text: "Your side hustle takes off.", amount: 7000 },
   { text: "Vet bills for the family dog.", amount: -3000 },
   { text: "You find money in an old coat pocket.", amount: 500 },
+  { text: "You get a surprise year-end bonus!", amount: 12000 },
+  { text: "A pipe bursts and floods your kitchen.", amount: -6000 },
+  { text: "You win a trivia night grand prize.", amount: 4000 },
+  { text: "Your flight gets cancelled — rebooking fees.", amount: -1800 },
+  { text: "You refinance and save on interest.", amount: 5000 },
+  { text: "Your phone falls in the toilet.", amount: -900 },
+  { text: "You flip a thrift-store find for a big profit.", amount: 3000 },
+  { text: "Your identity is used for a small fraud charge — resolved for a fee.", amount: -2500 },
+  { text: "A generous stranger pays for your coffee run all week.", amount: 200 },
+  { text: "You get audited but come out even after a small penalty.", amount: -1200 },
+  { text: "Your favorite team wins and you cashed in a bet.", amount: 1500 },
+  { text: "Your roof needs emergency repairs.", amount: -7000 },
+  { text: "You win a raffle at a community fundraiser.", amount: 2000 },
+  { text: "You accidentally book two vacations — cancellation fee.", amount: -1000 },
+  { text: "Your investment club has a great quarter.", amount: 4500 },
 ];
 
 const STARTING_CASH = 10000;
 const KID_BONUS = 25000;
 const MARRIAGE_BONUS = 50000;
+const LAWSUIT_AMOUNT = 5000;
 
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]!;
@@ -94,6 +113,7 @@ function pick<T>(arr: T[]): T {
 
 interface LifePlayer {
   id: PlayerId;
+  piece: string | null;
   position: number;
   cash: number;
   pathChosen: boolean;
@@ -105,13 +125,16 @@ interface LifePlayer {
   finished: boolean;
 }
 
+export type LifePhase = "setup" | "playing" | "finished";
+
 export interface LifeState {
   hostId: PlayerId;
   order: PlayerId[];
   turnIndex: number;
   players: Record<PlayerId, LifePlayer>;
-  phase: "playing" | "finished";
+  phase: LifePhase;
   lastRoll: number | null;
+  lastMovedPlayerId: PlayerId | null;
   log: string[];
 }
 
@@ -121,9 +144,12 @@ export interface LifeView {
   turnIndex: number;
   yourTurn: boolean;
   needsPathChoice: boolean;
+  yourPiece: string | null;
+  availablePieces: string[];
   board: LifeTileKind[];
   players: {
     id: PlayerId;
+    piece: string | null;
     position: number;
     cash: number;
     path: "college" | "career" | null;
@@ -134,12 +160,13 @@ export interface LifeView {
     finished: boolean;
     netWorth: number;
   }[];
-  phase: "playing" | "finished";
+  phase: LifePhase;
   lastRoll: number | null;
+  lastMovedPlayerId: PlayerId | null;
   log: string[];
 }
 
-export type LifeAction = { type: "choosePath"; path: "college" | "career" } | { type: "spin" };
+export type LifeAction = { type: "choosePiece"; piece: string } | { type: "choosePath"; path: "college" | "career" } | { type: "spin" };
 
 function netWorth(p: LifePlayer): number {
   return p.cash + (p.house?.cost ?? 0) + p.kids * KID_BONUS + (p.married ? MARRIAGE_BONUS : 0);
@@ -170,6 +197,7 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
     for (const p of playersIn) {
       players[p.id] = {
         id: p.id,
+        piece: null,
         position: 0,
         cash: STARTING_CASH,
         pathChosen: false,
@@ -186,13 +214,33 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
       order,
       turnIndex: 0,
       players,
-      phase: "playing",
+      phase: "setup",
       lastRoll: null,
-      log: ["The game begins! Choose College or a straight-to-work Career on your first turn."],
+      lastMovedPlayerId: null,
+      log: ["Pick your piece to begin!"],
     };
   },
   applyAction(state, playerId, action) {
     if (state.phase === "finished") throw new GameActionError("Game is already over.");
+
+    if (action.type === "choosePiece") {
+      if (state.phase !== "setup") throw new GameActionError("Pieces are locked in once the game starts.");
+      if (!PIECES.includes(action.piece)) throw new GameActionError("Invalid piece.");
+      const taken = Object.values(state.players).some((p) => p.piece === action.piece);
+      if (taken) throw new GameActionError("Someone already picked that piece.");
+      const players = { ...state.players, [playerId]: { ...state.players[playerId]!, piece: action.piece } };
+      const everyoneReady = state.order.every((pid) => players[pid]!.piece !== null);
+      return {
+        ...state,
+        players,
+        phase: everyoneReady ? "playing" : "setup",
+        log: everyoneReady
+          ? [...state.log, "Everyone's picked their piece — let's go! Choose College or a straight-to-work Career on your first turn."]
+          : [...state.log, `${playerId} picked ${action.piece}.`],
+      };
+    }
+
+    if (state.phase !== "playing") throw new GameActionError("Waiting for everyone to pick a piece.");
     const current = state.order[state.turnIndex]!;
     if (current !== playerId) throw new GameActionError("It's not your turn.");
     const player = state.players[playerId]!;
@@ -224,6 +272,7 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
       let kids = player.kids;
       let house = player.house;
       let career = player.career;
+      let lawsuitTarget: PlayerId | null = null;
       const log: string[] = [...state.log, `${playerId} spun a ${roll}.`];
 
       // Collect salary for every payday space passed through or landed on.
@@ -265,6 +314,26 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
           log.push(`${playerId}: "${card.text}" (${card.amount >= 0 ? "+" : "-"}$${Math.abs(card.amount).toLocaleString()})`);
           break;
         }
+        case "lawsuit": {
+          const others = state.order.filter((pid) => pid !== playerId);
+          if (others.length > 0) {
+            lawsuitTarget = pick(others);
+            cash -= LAWSUIT_AMOUNT;
+            log.push(`${playerId} is sued and pays $${LAWSUIT_AMOUNT.toLocaleString()} to ${lawsuitTarget}!`);
+          }
+          break;
+        }
+        case "lottery": {
+          const won = Math.random() < 0.5;
+          if (won) {
+            cash += 8000;
+            log.push(`${playerId} wins the lottery! (+$8,000)`);
+          } else {
+            cash -= 2000;
+            log.push(`${playerId} buys a losing lottery ticket. (-$2,000)`);
+          }
+          break;
+        }
         case "retire":
           log.push(`${playerId} reached Retirement!`);
           break;
@@ -273,7 +342,10 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
       }
 
       const finished = newPos >= BOARD.length - 1;
-      const players = { ...state.players, [playerId]: { ...player, position: newPos, cash, married, kids, house, career, finished } };
+      let players = { ...state.players, [playerId]: { ...player, position: newPos, cash, married, kids, house, career, finished } };
+      if (lawsuitTarget) {
+        players = { ...players, [lawsuitTarget]: { ...players[lawsuitTarget]!, cash: players[lawsuitTarget]!.cash + LAWSUIT_AMOUNT } };
+      }
 
       const allFinished = state.order.every((pid) => players[pid]!.finished);
       const nextTurnIndex = allFinished ? state.turnIndex : findNextTurnIndex({ ...state, players }, state.turnIndex);
@@ -282,6 +354,7 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
         ...state,
         players,
         lastRoll: roll,
+        lastMovedPlayerId: playerId,
         turnIndex: nextTurnIndex,
         phase: allFinished ? "finished" : "playing",
         log: log.slice(-40),
@@ -293,17 +366,21 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
   getPlayerView(state, playerId) {
     const current = state.order[state.turnIndex]!;
     const you = state.players[playerId]!;
+    const takenPieces = new Set(Object.values(state.players).map((p) => p.piece).filter((p): p is string => p !== null));
     return {
       hostId: state.hostId,
       order: state.order,
       turnIndex: state.turnIndex,
       yourTurn: current === playerId && state.phase === "playing",
       needsPathChoice: current === playerId && !you.pathChosen,
+      yourPiece: you.piece,
+      availablePieces: PIECES.filter((p) => !takenPieces.has(p)),
       board: BOARD,
       players: state.order.map((pid) => {
         const p = state.players[pid]!;
         return {
           id: p.id,
+          piece: p.piece,
           position: p.position,
           cash: p.cash,
           path: p.path,
@@ -317,6 +394,7 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
       }),
       phase: state.phase,
       lastRoll: state.lastRoll,
+      lastMovedPlayerId: state.lastMovedPlayerId,
       log: state.log.slice(-8),
     };
   },

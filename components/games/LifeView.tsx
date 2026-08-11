@@ -11,11 +11,31 @@ const TILE_ICON: Record<string, string> = {
   baby: "👶",
   house: "🏠",
   career: "💼",
+  lawsuit: "⚖️",
+  lottery: "🎰",
   neutral: "·",
   retire: "🎉",
 };
 
 const PLAYER_COLORS = ["#e94560", "#f2b705", "#22c55e", "#3b82f6", "#a855f7", "#f97316"];
+
+const COLS = 6;
+
+// Lays the board out as a winding snake path (like a real board game),
+// alternating direction every row, computed as percentages so it's fully
+// responsive.
+function tilePercentPosition(index: number, total: number) {
+  const rows = Math.ceil(total / COLS);
+  const row = Math.floor(index / COLS);
+  const colInRow = index % COLS;
+  const col = row % 2 === 0 ? colInRow : COLS - 1 - colInRow;
+  return {
+    left: `${(col / COLS) * 100}%`,
+    top: `${(row / rows) * 100}%`,
+    width: `${100 / COLS}%`,
+    height: `${100 / rows}%`,
+  };
+}
 
 function money(n: number) {
   return `$${n.toLocaleString()}`;
@@ -35,6 +55,39 @@ export default function LifeView({
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
   const current = view.order[view.turnIndex]!;
   const colorFor = (id: string) => PLAYER_COLORS[view.order.indexOf(id) % PLAYER_COLORS.length]!;
+  const total = view.board.length;
+  const rows = Math.ceil(total / COLS);
+
+  if (view.phase === "setup") {
+    return (
+      <div className="flex flex-col items-center gap-6 py-10">
+        <h2 className="text-xl font-bold">🚗 Pick your piece</h2>
+        <div className="flex flex-wrap justify-center gap-3">
+          {view.players.map((p) => (
+            <div key={p.id} className="flex flex-col items-center gap-1 rounded-xl bg-white/5 px-3 py-2">
+              <span className="text-2xl">{p.piece ?? "❔"}</span>
+              <span className="text-xs text-slate-400">{nameFor(p.id)}</span>
+            </div>
+          ))}
+        </div>
+        {!view.yourPiece ? (
+          <div className="flex flex-wrap justify-center gap-3">
+            {view.availablePieces.map((piece) => (
+              <button
+                key={piece}
+                className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/5 text-3xl transition hover:scale-110 hover:bg-white/10"
+                onClick={() => onAction({ type: "choosePiece", piece })}
+              >
+                {piece}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-slate-400">You picked {view.yourPiece}. Waiting for everyone else…</p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -49,25 +102,41 @@ export default function LifeView({
         )}
       </div>
 
-      <div className="mx-auto grid w-full max-w-3xl grid-cols-9 gap-1 sm:grid-cols-12">
+      <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-2xl border border-white/10 bg-panel" style={{ aspectRatio: `${COLS} / ${rows}` }}>
         {view.board.map((kind, i) => {
-          const occupants = view.players.filter((p) => p.position === i);
+          const pos = tilePercentPosition(i, total);
           return (
             <div
               key={i}
-              className={`relative flex h-10 flex-col items-center justify-center rounded-md text-[10px] ${
-                kind === "retire" ? "bg-gold/20" : kind === "payday" ? "bg-emerald-500/10" : "bg-white/5"
+              className={`absolute flex flex-col items-center justify-center border border-black/20 text-[9px] sm:text-xs ${
+                kind === "retire" ? "bg-gold/25" : kind === "payday" ? "bg-emerald-500/15" : "bg-white/5"
               }`}
+              style={pos}
               title={kind}
             >
-              <span>{TILE_ICON[kind]}</span>
-              {occupants.length > 0 && (
-                <div className="absolute -bottom-1 flex gap-0.5">
-                  {occupants.map((p) => (
-                    <span key={p.id} className="h-2 w-2 rounded-full border border-black/30" style={{ backgroundColor: colorFor(p.id) }} />
-                  ))}
-                </div>
-              )}
+              <span className="text-base sm:text-lg">{TILE_ICON[kind]}</span>
+            </div>
+          );
+        })}
+
+        {view.players.map((p, pi) => {
+          const pos = tilePercentPosition(p.position, total);
+          // Offset each player's token slightly within the tile so multiple pieces on one space don't fully overlap.
+          const offsetX = (pi % 3) * 22 - 22;
+          const offsetY = Math.floor(pi / 3) * 22 - 11;
+          return (
+            <div
+              key={p.id}
+              className="absolute flex items-center justify-center text-lg transition-all duration-700 ease-in-out sm:text-2xl"
+              style={{
+                left: `calc(${pos.left} + ${pos.width} / 2 + ${offsetX}px)`,
+                top: `calc(${pos.top} + ${pos.height} / 2 + ${offsetY}px)`,
+                transform: "translate(-50%, -50%)",
+                filter: `drop-shadow(0 0 3px ${colorFor(p.id)})`,
+              }}
+              title={nameFor(p.id)}
+            >
+              {p.piece ?? "🚗"}
             </div>
           );
         })}
@@ -77,13 +146,11 @@ export default function LifeView({
         {view.players.map((p) => (
           <div key={p.id} className="card-surface rounded-2xl p-4" style={{ borderColor: p.id === current ? colorFor(p.id) : undefined }}>
             <div className="mb-2 flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: colorFor(p.id) }} />
+              <span className="text-lg">{p.piece}</span>
               <p className="font-semibold">{nameFor(p.id)}</p>
               {p.finished && <span className="ml-auto text-xs text-gold">retired</span>}
             </div>
-            <p className="text-sm text-slate-300">
-              {p.career ? `${p.career.title} · ${money(p.career.salary)}/payday` : "No career chosen yet"}
-            </p>
+            <p className="text-sm text-slate-300">{p.career ? `${p.career.title} · ${money(p.career.salary)}/payday` : "No career chosen yet"}</p>
             <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-400">
               <span>Cash: {money(p.cash)}</span>
               {p.married && <span>💍 Married</span>}

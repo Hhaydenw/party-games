@@ -77,7 +77,7 @@ export default function NameThatTuneView({
             {view.guesses.map((g) =>
               g.correct ? (
                 <p key={g.id} className="text-emerald-400">
-                  🎉 {nameFor(g.playerId)} got it!
+                  🎉 {nameFor(g.playerId)} got it!{g.bothBonus && " 🎯 title + artist bonus!"}
                 </p>
               ) : (
                 <p key={g.id} className="text-slate-300">
@@ -88,16 +88,19 @@ export default function NameThatTuneView({
             )}
           </div>
           {!view.youGuessedCorrectly ? (
-            <form onSubmit={submitGuess} className="flex gap-2">
-              <input
-                autoFocus
-                className="input"
-                placeholder="Song title or artist…"
-                value={guessDraft}
-                maxLength={80}
-                onChange={(e) => setGuessDraft(e.target.value)}
-              />
-              <button className="btn-primary shrink-0">Guess</button>
+            <form onSubmit={submitGuess} className="flex flex-col gap-1.5">
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  className="input"
+                  placeholder="Song title or artist…"
+                  value={guessDraft}
+                  maxLength={80}
+                  onChange={(e) => setGuessDraft(e.target.value)}
+                />
+                <button className="btn-primary shrink-0">Guess</button>
+              </div>
+              <p className="text-center text-xs text-slate-500">Tip: guess both, e.g. "Bohemian Rhapsody - Queen", for bonus points</p>
             </form>
           ) : (
             <p className="text-center text-sm text-emerald-400">You got it! Waiting for the round to end…</p>

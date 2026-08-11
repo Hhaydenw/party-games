@@ -21,21 +21,35 @@ games are fully implemented:
 | **Name That Tune** | 📱 Party | 2–12 |
 
 Nothing is on the "coming soon" shelf right now — see
-[Adding a new game](#adding-a-new-game) if you want to keep going (Hearts, trading in
-Monopoly, more Life board forks, etc.).
+[Adding a new game](#adding-a-new-game) if you want to keep going.
+
+The host can tune each round-based game before starting it — a **Settings** panel
+appears in the lobby once a game is picked (number of rounds; Name That Tune also
+gets genre/decade filters). Board games (Connect Four, Uno, Life, Monopoly) don't
+have a settings panel since they play to a win condition rather than N rounds.
 
 **Known simplifications**, called out here rather than hidden:
-- **Monopoly**: no player-to-player trading (a full offer/counter-offer UI is its
-  own project), no property auctions when a purchase is declined, and house
-  building doesn't enforce the "even build" rule. The host can also force-end the
-  game at any time — the richest player (cash + property value) wins — since real
-  Monopoly games can run long at a party.
-- **The Game of Life**: single track (no board forks), no stock/business spaces,
-  no insurance, house values don't fluctuate.
+- **Monopoly** has real trading (propose/accept/decline, cash + properties both
+  ways), auctions when a purchase is declined, piece selection, a real square
+  board, an animated dice roll, and a fullscreen toggle. Still simplified vs. the
+  physical game: house building doesn't enforce the "even build" rule, and a
+  player going bankrupt doesn't get a grace period to mortgage their way out of it
+  first. The host can also force-end the game at any time — the richest player
+  (cash + property value) wins — since real Monopoly games can run long at a party.
+- **The Game of Life** has piece selection and a real winding board with animated
+  movement. Still simplified: single track (no board forks), no stock/business
+  spaces, no insurance, house values don't fluctuate.
+- **Family Feud**'s face-off is a real buzz-in: first captain to buzz gets the
+  first guess, and if they miss it passes to the other captain. Guessing while in
+  control rotates through your team in order rather than letting everyone answer
+  at once, and the full survey reveals at the end of every round.
 - **Name That Tune** fetches real 30-second clips live from Apple's free, keyless
   [iTunes Search API](https://performance-partners.apple.com/search-api) — no
   account or API key needed, but it does mean that game needs your server to have
-  outbound internet access (fine on Render/any normal host).
+  outbound internet access (fine on Render/any normal host). It tracks which songs
+  have already played (across games, for as long as the server process stays up)
+  so you won't hear the same song twice in a row across sessions, and guessing
+  both the title and artist in one guess earns bonus points.
 
 ## Running it locally
 
@@ -96,6 +110,10 @@ survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-me
   `lib/rooms.ts` serializes a room's actions so two async operations for the same
   room can't race each other.
 - **`components/`**: lobby, invite link, chat, and one view component per game.
+- Games can declare `meta.options` (a number or select field, e.g. "Rounds" or
+  "Genre") and the lobby renders controls for them automatically
+  (`components/GameOptionsPanel.tsx`); the room manager validates/defaults them
+  and passes the resolved values into `createInitialState`.
 
 Sessions (so refreshing the page or a dropped wifi connection doesn't kick you out
 of a room) are stored in the browser via `localStorage`, keyed per room code, and

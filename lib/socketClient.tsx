@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { ClientToServerEvents, RoomSummary, ServerToClientEvents } from "@/lib/types";
+import { ClientToServerEvents, GameOptions, RoomSummary, ServerToClientEvents } from "@/lib/types";
 
 export interface StoredSession {
   code: string;
@@ -48,6 +48,7 @@ interface Ctx {
   joinRoom: (code: string, name: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   rejoinRoom: (code: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   selectGame: (gameId: string) => void;
+  setGameOptions: (options: GameOptions) => void;
   startGame: () => void;
   returnToLobby: () => void;
   sendAction: (action: unknown) => void;
@@ -129,6 +130,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const selectGame = useCallback((gameId: string) => socketRef.current?.emit("room:selectGame", { gameId }), []);
+  const setGameOptions = useCallback((options: GameOptions) => socketRef.current?.emit("room:setGameOptions", { options }), []);
   const startGame = useCallback(() => socketRef.current?.emit("room:startGame"), []);
   const returnToLobby = useCallback(() => socketRef.current?.emit("room:returnToLobby"), []);
   const sendAction = useCallback((action: unknown) => socketRef.current?.emit("game:action", { action }), []);
@@ -147,13 +149,14 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       joinRoom,
       rejoinRoom,
       selectGame,
+      setGameOptions,
       startGame,
       returnToLobby,
       sendAction,
       sendChat,
       currentPlayerId,
     }),
-    [connected, room, gameView, error, chatMessages, clearError, createRoom, joinRoom, rejoinRoom, selectGame, startGame, returnToLobby, sendAction, sendChat, currentPlayerId]
+    [connected, room, gameView, error, chatMessages, clearError, createRoom, joinRoom, rejoinRoom, selectGame, setGameOptions, startGame, returnToLobby, sendAction, sendChat, currentPlayerId]
   );
 
   return <SocketCtx.Provider value={value}>{children}</SocketCtx.Provider>;

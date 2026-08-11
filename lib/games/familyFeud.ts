@@ -1,9 +1,9 @@
-import { GameActionError, GameDefinition, PlayerId, PlayerInfo } from "@/lib/types";
+import { GameActionError, GameDefinition, GameOptions, PlayerId, PlayerInfo } from "@/lib/types";
 
 // A simplified Family Feud: two teams, survey questions with ranked hidden
-// answers, a face-off to win control of the board, and a steal mechanic.
-// Simplification vs. the TV show: the face-off winner always plays (no
-// play/pass choice), and a steal is a single shared guess for the team.
+// answers, a buzz-in face-off to win control of the board, and a steal
+// mechanic. Simplification vs. the TV show: the face-off winner always plays
+// (no play/pass choice), and a steal is a single shared guess for the team.
 
 type TeamId = "A" | "B";
 
@@ -121,7 +121,7 @@ const QUESTION_BANK: FeudQuestionDef[] = [
   },
 ];
 
-const TOTAL_ROUNDS = 6;
+const DEFAULT_ROUNDS = 6;
 
 export type FeudPhase = "faceoff" | "controlling" | "stealing" | "roundEnd" | "finished";
 
@@ -148,8 +148,13 @@ export interface FeudState {
   prompt: string;
   answers: FeudAnswer[];
   phase: FeudPhase;
-  faceoffSubmissions: Partial<Record<TeamId, string>>;
+  // Face-off is now a buzz-in: whoever's captain buzzes first gets first crack
+  // at the answer; if they miss, the other captain gets a turn.
+  faceoffBuzzedTeam: TeamId | null; // whose captain currently has the floor
+  faceoffFirstTeam: TeamId | null; // who buzzed in first this face-off (tiebreak if both miss)
+  faceoffAttempted: TeamId[]; // teams that already used their one face-off guess
   controllingTeam: TeamId | null;
+  controllingIndex: number; // whose turn (index into that team's memberIds) to guess next
   stealingTeam: TeamId | null;
   strikes: number;
   pot: number;
@@ -169,7 +174,9 @@ export interface FeudView {
   prompt: string;
   answers: { index: number; text: string | null; points: number | null; revealed: boolean }[];
   phase: FeudPhase;
-  yourFaceoffSubmitted: boolean;
+  faceoffBuzzedTeam: TeamId | null;
+  faceoffAttempted: TeamId[];
+  currentGuesserId: PlayerId | null; // whose turn it is to guess during controlling/stealing
   controllingTeam: TeamId | null;
   stealingTeam: TeamId | null;
   strikes: number;
@@ -178,7 +185,7 @@ export interface FeudView {
   lastRoundResult: FeudState["lastRoundResult"];
 }
 
-export type FeudAction = { type: "faceoffAnswer"; text: string } | { type: "guess"; text: string } | { type: "steal"; text: string } | { type: "advance" };
+export type FeudAction = { type: "buzz" } | { type: "faceoffAnswer"; text: string } | { type: "guess"; text: string } | { type: "steal"; text: string } | { type: "advance" };
 
 function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice();
@@ -228,8 +235,11 @@ function startRound(state: FeudState, roundIndex: number): FeudState {
     prompt: def.prompt,
     answers: buildAnswers(def),
     phase: "faceoff",
-    faceoffSubmissions: {},
+    faceoffBuzzedTeam: null,
+    faceoffFirstTeam: null,
+    faceoffAttempted: [],
     controllingTeam: null,
+    controllingIndex: 0,
     stealingTeam: null,
     strikes: 0,
     pot: 0,
@@ -238,14 +248,18 @@ function startRound(state: FeudState, roundIndex: number): FeudState {
   };
 }
 
+// Reveals every remaining hidden answer (so the board shows the full survey
+// once a round is over) and banks the pot for the winning team, if any.
 function endRound(state: FeudState, winningTeam: TeamId | null, reason: string): FeudState {
   const teams = { ...state.teams };
   if (winningTeam) {
     teams[winningTeam] = { ...teams[winningTeam], score: teams[winningTeam].score + state.pot };
   }
+  const answers = state.answers.map((a) => (a.revealed ? a : { ...a, revealed: true }));
   return {
     ...state,
     teams,
+    answers,
     phase: "roundEnd",
     lastRoundResult: { winningTeam, pot: state.pot, reason },
     roundLog: [...state.roundLog, reason],
@@ -260,14 +274,16 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
     category: "party",
     minPlayers: 4,
     maxPlayers: 12,
+    options: [{ key: "rounds", label: "Rounds", type: "number", min: 1, max: QUESTION_BANK.length, default: DEFAULT_ROUNDS }],
   },
-  createInitialState(players: PlayerInfo[]) {
+  createInitialState(players: PlayerInfo[], options: GameOptions) {
     const host = players.find((p) => p.isHost) ?? players[0]!;
     const shuffled = shuffle(players);
     const teamA: FeudTeam = { id: "A", name: "Team Red", memberIds: [], score: 0 };
     const teamB: FeudTeam = { id: "B", name: "Team Blue", memberIds: [], score: 0 };
     shuffled.forEach((p, i) => (i % 2 === 0 ? teamA : teamB).memberIds.push(p.id));
-    const questionOrder = shuffle(QUESTION_BANK.map((_, i) => i)).slice(0, Math.min(TOTAL_ROUNDS, QUESTION_BANK.length));
+    const roundCount = Math.min(Number(options.rounds) || DEFAULT_ROUNDS, QUESTION_BANK.length);
+    const questionOrder = shuffle(QUESTION_BANK.map((_, i) => i)).slice(0, roundCount);
 
     const base: FeudState = {
       hostId: host.id,
@@ -278,8 +294,11 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
       prompt: "",
       answers: [],
       phase: "faceoff",
-      faceoffSubmissions: {},
+      faceoffBuzzedTeam: null,
+      faceoffFirstTeam: null,
+      faceoffAttempted: [],
       controllingTeam: null,
+      controllingIndex: 0,
       stealingTeam: null,
       strikes: 0,
       pot: 0,
@@ -293,69 +312,90 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
     const yourTeam: TeamId | null = state.teams.A.memberIds.includes(playerId) ? "A" : state.teams.B.memberIds.includes(playerId) ? "B" : null;
     if (!yourTeam) throw new GameActionError("You're not on a team in this game.");
 
-    if (action.type === "faceoffAnswer") {
+    if (action.type === "buzz") {
       if (state.phase !== "faceoff") throw new GameActionError("No face-off happening right now.");
+      if (state.faceoffBuzzedTeam) throw new GameActionError("Someone already buzzed in.");
       const captain = captainOf(state.teams[yourTeam], state.roundIndex);
-      if (playerId !== captain) throw new GameActionError("Only your team's face-off player can answer.");
-      if (state.faceoffSubmissions[yourTeam]) throw new GameActionError("You already answered.");
-      const text = action.text.trim().slice(0, 60);
-      if (!text) throw new GameActionError("Answer can't be empty.");
-      const submissions = { ...state.faceoffSubmissions, [yourTeam]: text };
-
-      if (!submissions.A || !submissions.B) {
-        return { ...state, faceoffSubmissions: submissions };
-      }
-
-      // Both submitted: resolve the face-off.
-      const matchA = findMatch(submissions.A, state.answers);
-      const matchB = findMatch(submissions.B, state.answers);
-      const pointsA = matchA !== null ? state.answers[matchA]!.points : 0;
-      const pointsB = matchB !== null ? state.answers[matchB]!.points : 0;
-      // On a tie (including neither matching), whoever answered first (already
-      // present before this action) wins; `yourTeam` is the second submitter here.
-      const firstSubmitter: TeamId = yourTeam === "A" ? "B" : "A";
-      let winner: TeamId;
-      if (pointsA === pointsB) winner = firstSubmitter;
-      else winner = pointsA > pointsB ? "A" : "B";
-
-      const winnerMatch = winner === "A" ? matchA : matchB;
-      const answers = state.answers.slice();
-      let pot = 0;
-      let log = [...state.roundLog];
-      if (winnerMatch !== null) {
-        answers[winnerMatch] = { ...answers[winnerMatch]!, revealed: true };
-        pot = answers[winnerMatch]!.points;
-        log = [...log, `${state.teams[winner].name} wins the face-off with "${answers[winnerMatch]!.text}" and takes control.`];
-      } else {
-        log = [...log, `${state.teams[winner].name} wins the face-off and takes control.`];
-      }
-
+      if (playerId !== captain) throw new GameActionError("Only your team's face-off player can buzz in.");
+      if (state.faceoffAttempted.includes(yourTeam)) throw new GameActionError("Your team already had a turn.");
       return {
         ...state,
-        answers,
-        faceoffSubmissions: submissions,
+        faceoffBuzzedTeam: yourTeam,
+        faceoffFirstTeam: state.faceoffFirstTeam ?? yourTeam,
+        roundLog: [...state.roundLog, `${state.teams[yourTeam].name} buzzed in first!`],
+      };
+    }
+
+    if (action.type === "faceoffAnswer") {
+      if (state.phase !== "faceoff") throw new GameActionError("No face-off happening right now.");
+      if (state.faceoffBuzzedTeam !== yourTeam) throw new GameActionError("Buzz in first.");
+      const captain = captainOf(state.teams[yourTeam], state.roundIndex);
+      if (playerId !== captain) throw new GameActionError("Only your team's face-off player can answer.");
+      const text = action.text.trim().slice(0, 60);
+      if (!text) throw new GameActionError("Answer can't be empty.");
+
+      const attempted = [...state.faceoffAttempted, yourTeam];
+      const idx = findMatch(text, state.answers);
+      const log = [...state.roundLog, `${state.teams[yourTeam].name} answered "${text}".`];
+
+      if (idx !== null) {
+        const answers = state.answers.slice();
+        answers[idx] = { ...answers[idx]!, revealed: true };
+        return {
+          ...state,
+          answers,
+          faceoffAttempted: attempted,
+          phase: "controlling",
+          controllingTeam: yourTeam,
+          controllingIndex: 0,
+          pot: answers[idx]!.points,
+          roundLog: [...log, `On the board! ${state.teams[yourTeam].name} takes control.`],
+        };
+      }
+
+      const otherTeam: TeamId = yourTeam === "A" ? "B" : "A";
+      if (!attempted.includes(otherTeam)) {
+        // Not on the board — pass the floor to the other captain.
+        return {
+          ...state,
+          faceoffBuzzedTeam: otherTeam,
+          faceoffAttempted: attempted,
+          roundLog: [...log, `Not on the board. ${state.teams[otherTeam].name}'s turn to answer.`],
+        };
+      }
+
+      // Both teams missed — whoever buzzed in first gets control with an empty pot.
+      const winner = state.faceoffFirstTeam ?? yourTeam;
+      return {
+        ...state,
+        faceoffAttempted: attempted,
         phase: "controlling",
         controllingTeam: winner,
-        pot,
-        roundLog: log,
+        controllingIndex: 0,
+        pot: 0,
+        roundLog: [...log, `Both teams missed. ${state.teams[winner].name} takes control.`],
       };
     }
 
     if (action.type === "guess") {
       if (state.phase !== "controlling") throw new GameActionError("Your team isn't in control right now.");
       if (yourTeam !== state.controllingTeam) throw new GameActionError("It's the other team's turn to guess.");
+      const team = state.teams[yourTeam];
+      const expectedGuesser = team.memberIds[state.controllingIndex % team.memberIds.length]!;
+      if (playerId !== expectedGuesser) throw new GameActionError("It's a teammate's turn to guess.");
       const text = action.text.trim().slice(0, 60);
       if (!text) throw new GameActionError("Guess can't be empty.");
       const idx = findMatch(text, state.answers);
+      const controllingIndex = state.controllingIndex + 1;
 
       if (idx === null) {
         const strikes = state.strikes + 1;
         const log = [...state.roundLog, `${state.teams[yourTeam].name} guessed "${text}" — strike ${strikes}!`];
         if (strikes >= 3) {
           const other: TeamId = yourTeam === "A" ? "B" : "A";
-          return { ...state, strikes, phase: "stealing", stealingTeam: other, roundLog: log };
+          return { ...state, strikes, controllingIndex, phase: "stealing", stealingTeam: other, roundLog: log };
         }
-        return { ...state, strikes, roundLog: log };
+        return { ...state, strikes, controllingIndex, roundLog: log };
       }
 
       const answers = state.answers.slice();
@@ -363,7 +403,7 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
       const pot = state.pot + answers[idx]!.points;
       const log = [...state.roundLog, `${state.teams[yourTeam].name} revealed "${answers[idx]!.text}" (${answers[idx]!.points} pts).`];
       const boardCleared = answers.every((a) => a.revealed);
-      const next = { ...state, answers, pot, roundLog: log };
+      const next = { ...state, answers, pot, controllingIndex, roundLog: log };
       if (boardCleared) return endRound(next, yourTeam, `${state.teams[yourTeam].name} cleared the board and banks ${pot} points!`);
       return next;
     }
@@ -402,6 +442,11 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
     const captainA = captainOf(state.teams.A, state.roundIndex);
     const captainB = captainOf(state.teams.B, state.roundIndex);
     const areYouCaptain = playerId === captainA || playerId === captainB;
+    let currentGuesserId: PlayerId | null = null;
+    if (state.phase === "controlling" && state.controllingTeam) {
+      const team = state.teams[state.controllingTeam];
+      currentGuesserId = team.memberIds[state.controllingIndex % team.memberIds.length]!;
+    }
     return {
       hostId: state.hostId,
       yourTeam,
@@ -419,7 +464,9 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
         revealed: a.revealed,
       })),
       phase: state.phase,
-      yourFaceoffSubmitted: !!state.faceoffSubmissions[yourTeam],
+      faceoffBuzzedTeam: state.faceoffBuzzedTeam,
+      faceoffAttempted: state.faceoffAttempted,
+      currentGuesserId,
       controllingTeam: state.controllingTeam,
       stealingTeam: state.stealingTeam,
       strikes: state.strikes,

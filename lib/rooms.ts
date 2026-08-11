@@ -1,6 +1,24 @@
 import { customAlphabet, nanoid } from "nanoid";
-import { GameActionError, PlayerId, PlayerInfo, RoomStatus, RoomSummary } from "@/lib/types";
+import { GameActionError, GameMeta, GameOptions, PlayerId, PlayerInfo, RoomStatus, RoomSummary } from "@/lib/types";
 import { getGame } from "@/lib/games/registry";
+
+// Fills in defaults for any missing/invalid option and drops anything not
+// declared in the game's meta, so a game's reducer can trust `options` is
+// well-formed without re-validating it itself.
+function resolveOptions(meta: GameMeta, stored: GameOptions): GameOptions {
+  const resolved: GameOptions = {};
+  for (const def of meta.options ?? []) {
+    const raw = stored[def.key];
+    if (def.type === "number") {
+      const n = typeof raw === "number" ? raw : Number(raw);
+      resolved[def.key] = Number.isFinite(n) ? Math.min(def.max, Math.max(def.min, Math.round(n))) : def.default;
+    } else {
+      const valid = def.choices.some((c) => c.value === raw);
+      resolved[def.key] = valid ? (raw as string) : def.default;
+    }
+  }
+  return resolved;
+}
 
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 const genCode = customAlphabet(ROOM_CODE_ALPHABET, 4);
@@ -16,6 +34,7 @@ interface InternalRoom {
   playerOrder: PlayerId[];
   hostId: PlayerId | null;
   gameId: string | null;
+  gameOptions: GameOptions;
   gameState: unknown;
   createdAt: number;
   lastActivity: number;
@@ -75,6 +94,7 @@ class RoomManager {
       playerOrder: [playerId],
       hostId: playerId,
       gameId: null,
+      gameOptions: {},
       gameState: null,
       createdAt: Date.now(),
       lastActivity: Date.now(),
@@ -126,6 +146,16 @@ class RoomManager {
     if (room.status !== "lobby") throw new RoomError("Finish the current game before picking a new one.");
     if (!getGame(gameId)) throw new RoomError("Unknown game.");
     room.gameId = gameId;
+    room.gameOptions = {};
+    this.touch(room);
+  }
+
+  setGameOptions(code: string, requesterId: PlayerId, options: GameOptions): void {
+    const room = this.getRoomOrThrow(code);
+    this.assertHost(room, requesterId);
+    if (room.status !== "lobby") throw new RoomError("Can't change settings mid-game.");
+    if (!room.gameId) throw new RoomError("Pick a game first.");
+    room.gameOptions = { ...room.gameOptions, ...options };
     this.touch(room);
   }
 
@@ -140,7 +170,7 @@ class RoomManager {
       if (players.length < game.meta.minPlayers) throw new RoomError(`${game.meta.name} needs at least ${game.meta.minPlayers} players.`);
       if (players.length > game.meta.maxPlayers) throw new RoomError(`${game.meta.name} supports at most ${game.meta.maxPlayers} players.`);
       try {
-        room.gameState = await game.createInitialState(players);
+        room.gameState = await game.createInitialState(players, resolveOptions(game.meta, room.gameOptions));
       } catch (err) {
         throw new RoomError(err instanceof Error ? err.message : "Failed to start the game.");
       }
@@ -180,12 +210,14 @@ class RoomManager {
     this.assertHost(room, requesterId);
     room.status = "lobby";
     room.gameId = null;
+    room.gameOptions = {};
     room.gameState = null;
     this.touch(room);
   }
 
   getSummary(code: string): RoomSummary {
     const room = this.getRoomOrThrow(code);
+    const meta = room.gameId ? getGame(room.gameId)?.meta : undefined;
     return {
       code: room.code,
       status: room.status,
@@ -195,6 +227,7 @@ class RoomManager {
       }),
       gameId: room.gameId,
       hostId: room.hostId,
+      gameOptions: meta ? resolveOptions(meta, room.gameOptions) : {},
     };
   }
 

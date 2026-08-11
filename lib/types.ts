@@ -18,7 +18,30 @@ export interface RoomSummary {
   players: PlayerInfo[];
   gameId: string | null;
   hostId: PlayerId | null;
+  gameOptions: GameOptions;
 }
+
+// A configurable setting a game exposes in the lobby before it starts (e.g.
+// "number of rounds", "song genre"). The host adjusts these; everyone sees
+// the current values.
+export interface GameOptionNumberDef {
+  key: string;
+  label: string;
+  type: "number";
+  min: number;
+  max: number;
+  default: number;
+  step?: number;
+}
+export interface GameOptionSelectDef {
+  key: string;
+  label: string;
+  type: "select";
+  choices: { value: string; label: string }[];
+  default: string;
+}
+export type GameOptionDef = GameOptionNumberDef | GameOptionSelectDef;
+export type GameOptions = Record<string, number | string>;
 
 export interface GameMeta {
   id: string;
@@ -28,6 +51,7 @@ export interface GameMeta {
   minPlayers: number;
   maxPlayers: number;
   comingSoon?: boolean;
+  options?: GameOptionDef[];
 }
 
 // A game plugin. `S` is the full authoritative server-side state,
@@ -40,7 +64,7 @@ export interface GameMeta {
 // clip) can `async`/`await` inside them instead.
 export interface GameDefinition<S = unknown, V = unknown, A = unknown> {
   meta: GameMeta;
-  createInitialState(players: PlayerInfo[]): S | Promise<S>;
+  createInitialState(players: PlayerInfo[], options: GameOptions): S | Promise<S>;
   applyAction(state: S, playerId: PlayerId, action: A): S | Promise<S>;
   getPlayerView(state: S, playerId: PlayerId, players: PlayerInfo[]): V;
   isGameOver(state: S): boolean;
@@ -65,6 +89,7 @@ export interface ClientToServerEvents {
   "room:join": (payload: { code: string; name: string }, cb: (res: { ok: true; playerId: PlayerId; token: string } | { ok: false; error: string }) => void) => void;
   "room:rejoin": (payload: { code: string; playerId: PlayerId; token: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   "room:selectGame": (payload: { gameId: string }) => void;
+  "room:setGameOptions": (payload: { options: GameOptions }) => void;
   "room:startGame": () => void;
   "room:returnToLobby": () => void;
   "game:action": (payload: { action: unknown }) => void;

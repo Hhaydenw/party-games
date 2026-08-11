@@ -1,4 +1,4 @@
-import { GameActionError, GameDefinition, PlayerId } from "@/lib/types";
+import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/types";
 
 // A Fibbage/Family-Feud-style party game: everyone writes a convincing fake
 // answer to an obscure trivia prompt, then votes on which answer (among the
@@ -10,25 +10,34 @@ interface Question {
   answer: string;
 }
 
+// Answers are kept terse and stripped of hedge words ("about", "a", "the")
+// where possible — real trivia answers written in full sentences stick out
+// next to player-written bluffs, which defeats the point of the game.
 const QUESTION_BANK: Question[] = [
   { prompt: "According to Guinness World Records, what is the longest recorded duration of a hiccuping fit?", answer: "68 years" },
-  { prompt: "What everyday object did NASA originally develop as a way to keep astronauts' drinks from floating away?", answer: "The Snoopy straw cap" },
-  { prompt: "What was the first product ever sold with a barcode?", answer: "A pack of Wrigley's chewing gum" },
+  { prompt: "What everyday object did NASA originally develop as a way to keep astronauts' drinks from floating away?", answer: "Snoopy straw cap" },
+  { prompt: "What was the first product ever sold with a barcode?", answer: "Wrigley's chewing gum" },
   { prompt: "In Finland, what unusual sport involves carrying your spouse over an obstacle course?", answer: "Wife-carrying" },
   { prompt: "What common fear does the word 'coulrophobia' describe?", answer: "Fear of clowns" },
   { prompt: "What was the original name of the search engine that became Google?", answer: "BackRub" },
   { prompt: "How many hearts does an octopus have?", answer: "Three" },
   { prompt: "What country invented the paper napkin?", answer: "China" },
-  { prompt: "What is the only mammal capable of true flight?", answer: "The bat" },
+  { prompt: "What is the only mammal capable of true flight?", answer: "Bat" },
   { prompt: "What was banned in Iceland from 1915 to 1989?", answer: "Beer" },
-  { prompt: "According to a popular urban myth turned fact, how many times does the average person's heart beat in a lifetime?", answer: "About 2.5 billion" },
-  { prompt: "What fruit is technically classified as a giant berry?", answer: "The banana" },
-  { prompt: "What was the world's first webcam pointed at?", answer: "A coffee pot" },
-  { prompt: "What percentage of the Earth's fresh water is locked in glaciers and ice caps?", answer: "About 68%" },
-  { prompt: "What everyday item did Thomas Edison invent besides the light bulb, mostly forgotten today?", answer: "The talking doll" },
-  { prompt: "What animal's fingerprints are so similar to a human's that they've confused crime scene investigators?", answer: "The koala" },
-  { prompt: "What is a group of flamingos called?", answer: "A flamboyance" },
-  { prompt: "What was the most shoplifted book in the world for decades, according to booksellers?", answer: "The Guinness Book of Records" },
+  { prompt: "According to a popular urban myth turned fact, how many times does the average person's heart beat in a lifetime?", answer: "2.5 billion" },
+  { prompt: "What fruit is technically classified as a giant berry?", answer: "Banana" },
+  { prompt: "What was the world's first webcam pointed at?", answer: "Coffee pot" },
+  { prompt: "What percentage of the Earth's fresh water is locked in glaciers and ice caps?", answer: "68%" },
+  { prompt: "What everyday item did Thomas Edison invent besides the light bulb, mostly forgotten today?", answer: "Talking doll" },
+  { prompt: "What animal's fingerprints are so similar to a human's that they've confused crime scene investigators?", answer: "Koala" },
+  { prompt: "What is a group of flamingos called?", answer: "Flamboyance" },
+  { prompt: "What was the most shoplifted book in the world for decades, according to booksellers?", answer: "Guinness Book of Records" },
+  { prompt: "What was the first item ever sold on eBay?", answer: "Broken laser pointer" },
+  { prompt: "What was the original purpose of the Slinky toy?", answer: "Ship stabilizer" },
+  { prompt: "What everyday food was originally sold as a medicine?", answer: "Graham crackers" },
+  { prompt: "How long can a snail sleep in one stretch?", answer: "3 years" },
+  { prompt: "What was the first food eaten in space?", answer: "Applesauce" },
+  { prompt: "What is the most common street name in the US?", answer: "Second Street" },
 ];
 
 export type BluffPhase = "answering" | "voting" | "reveal" | "finished";
@@ -112,10 +121,12 @@ export const bluffTrivia: GameDefinition<BluffTriviaState, BluffTriviaView, Bluf
     category: "party",
     minPlayers: 3,
     maxPlayers: 12,
+    options: [{ key: "rounds", label: "Rounds", type: "number", min: 3, max: QUESTION_BANK.length, default: 8 }],
   },
-  createInitialState(players) {
+  createInitialState(players, options: GameOptions) {
     const host = players.find((p) => p.isHost) ?? players[0]!;
-    const questions = shuffle(QUESTION_BANK).slice(0, Math.min(8, QUESTION_BANK.length));
+    const roundCount = Math.min(Number(options.rounds) || 8, QUESTION_BANK.length);
+    const questions = shuffle(QUESTION_BANK).slice(0, roundCount);
     const scores: Record<PlayerId, number> = {};
     for (const p of players) scores[p.id] = 0;
     return {
