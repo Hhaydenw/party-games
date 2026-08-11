@@ -3,23 +3,39 @@
 A multiplayer web app for playing party games with friends: create a room, share an
 invite link, everyone picks a display name, and you play together in real time.
 
-## What's in the MVP
+## What's in it
 
-The platform (rooms, invite links, display names, lobby, reconnect) is fully built
-and designed so new games can be dropped in without touching anything else. Three
-games are fully implemented to prove out each category:
+The platform (rooms, invite links, display names, lobby, reconnect) is built so
+new games drop in as self-contained plugins without touching anything else. Eight
+games are fully implemented:
 
 | Game | Category | Players |
 |---|---|---|
 | **Switch** (Uno-style) | 🃏 Card | 2–8 |
 | **Connect Four** | 🎲 Board | 2 |
-| **Bluff Trivia** (Fibbage/Family-Feud-style) | 📱 Party | 3–12 |
+| **The Game of Life** | 🎲 Board | 2–6 |
+| **Monopoly** | 🎲 Board | 2–6 |
+| **Bluff Trivia** (Fibbage-style) | 📱 Party | 3–12 |
+| **Family Feud** | 📱 Party | 4–12 |
+| **Doodle Guess** (Pictionary/skribbl-style) | 📱 Party | 3–10 |
+| **Name That Tune** | 📱 Party | 2–12 |
 
-**Not built yet** (shown greyed-out in the lobby as "coming soon"): Monopoly, The
-Game of Life, Family Feud, Name That Tune, Hearts. These are much bigger builds —
-Monopoly and Life especially need property/board/banking systems — see
-[Adding a new game](#adding-a-new-game) below for how to add them when you're ready.
-I can build any of these out next if you want to keep going.
+Nothing is on the "coming soon" shelf right now — see
+[Adding a new game](#adding-a-new-game) if you want to keep going (Hearts, trading in
+Monopoly, more Life board forks, etc.).
+
+**Known simplifications**, called out here rather than hidden:
+- **Monopoly**: no player-to-player trading (a full offer/counter-offer UI is its
+  own project), no property auctions when a purchase is declined, and house
+  building doesn't enforce the "even build" rule. The host can also force-end the
+  game at any time — the richest player (cash + property value) wins — since real
+  Monopoly games can run long at a party.
+- **The Game of Life**: single track (no board forks), no stock/business spaces,
+  no insurance, house values don't fluctuate.
+- **Name That Tune** fetches real 30-second clips live from Apple's free, keyless
+  [iTunes Search API](https://performance-partners.apple.com/search-api) — no
+  account or API key needed, but it does mean that game needs your server to have
+  outbound internet access (fine on Render/any normal host).
 
 ## Running it locally
 
@@ -71,10 +87,14 @@ survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-me
 - **`lib/rooms.ts`**: in-memory room manager — codes, players, host, reconnection
   tokens, game lifecycle.
 - **`lib/games/*.ts`**: each game is a self-contained plugin implementing the
-  `GameDefinition` interface (`lib/types.ts`) — pure functions for creating state,
+  `GameDefinition` interface (`lib/types.ts`) — functions for creating state,
   applying a validated action, and producing a per-player "view" that hides
   information the player shouldn't see (e.g. opponents' Uno hands, other players'
-  bluff answers before voting).
+  bluff answers before voting). Most games are pure and synchronous; a game can
+  also return a `Promise` from `createInitialState`/`applyAction` if it needs to
+  await something external (Name That Tune awaits the iTunes API for each song).
+  `lib/rooms.ts` serializes a room's actions so two async operations for the same
+  room can't race each other.
 - **`components/`**: lobby, invite link, chat, and one view component per game.
 
 Sessions (so refreshing the page or a dropped wifi connection doesn't kick you out

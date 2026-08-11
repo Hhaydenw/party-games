@@ -33,10 +33,15 @@ export interface GameMeta {
 // A game plugin. `S` is the full authoritative server-side state,
 // `V` is what an individual player is allowed to see, `A` is an action a
 // player can submit.
+//
+// `createInitialState` and `applyAction` may return a Promise. Most games are
+// pure and synchronous (their return value just resolves immediately); a game
+// that needs to hit an external API for round setup (e.g. fetching a song
+// clip) can `async`/`await` inside them instead.
 export interface GameDefinition<S = unknown, V = unknown, A = unknown> {
   meta: GameMeta;
-  createInitialState(players: PlayerInfo[]): S;
-  applyAction(state: S, playerId: PlayerId, action: A): S;
+  createInitialState(players: PlayerInfo[]): S | Promise<S>;
+  applyAction(state: S, playerId: PlayerId, action: A): S | Promise<S>;
   getPlayerView(state: S, playerId: PlayerId, players: PlayerInfo[]): V;
   isGameOver(state: S): boolean;
   getWinnerIds(state: S): PlayerId[];

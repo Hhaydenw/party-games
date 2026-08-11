@@ -5,6 +5,11 @@ import { useParty } from "@/lib/socketClient";
 import Connect4View from "@/components/games/Connect4View";
 import UnoView from "@/components/games/UnoView";
 import BluffTriviaView from "@/components/games/BluffTriviaView";
+import DrawingView from "@/components/games/DrawingView";
+import FamilyFeudView from "@/components/games/FamilyFeudView";
+import NameThatTuneView from "@/components/games/NameThatTuneView";
+import LifeView from "@/components/games/LifeView";
+import MonopolyView from "@/components/games/MonopolyView";
 import PlayerList from "@/components/PlayerList";
 
 export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
@@ -47,6 +52,17 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
           {gameView.gameId === "bluff-trivia" && (
             <BluffTriviaView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
           )}
+          {gameView.gameId === "drawing" && (
+            <DrawingView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
+          )}
+          {gameView.gameId === "family-feud" && (
+            <FamilyFeudView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
+          )}
+          {gameView.gameId === "name-that-tune" && (
+            <NameThatTuneView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
+          )}
+          {gameView.gameId === "life" && <LifeView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}
+          {gameView.gameId === "monopoly" && <MonopolyView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}
         </section>
         <aside className="card-surface h-fit rounded-3xl p-4">
           <h3 className="mb-3 text-sm font-semibold text-slate-300">Players</h3>

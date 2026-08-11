@@ -104,11 +104,11 @@ app.prepare().then(() => {
       }
     });
 
-    socket.on("room:startGame", () => {
+    socket.on("room:startGame", async () => {
       const meta = socketMeta.get(socket.id);
       if (!meta) return;
       try {
-        roomManager.startGame(meta.code, meta.playerId);
+        await roomManager.startGame(meta.code, meta.playerId);
         broadcastRoomState(io, meta.code);
       } catch (err) {
         socket.emit("error:message", err instanceof RoomError ? err.message : "Something went wrong.");
@@ -126,11 +126,11 @@ app.prepare().then(() => {
       }
     });
 
-    socket.on("game:action", ({ action }) => {
+    socket.on("game:action", async ({ action }) => {
       const meta = socketMeta.get(socket.id);
       if (!meta) return;
       try {
-        roomManager.applyGameAction(meta.code, meta.playerId, action);
+        await roomManager.applyGameAction(meta.code, meta.playerId, action);
         broadcastRoomState(io, meta.code);
       } catch (err) {
         socket.emit("error:message", err instanceof RoomError ? err.message : "Something went wrong.");

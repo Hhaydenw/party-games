@@ -27,6 +27,20 @@ export class RoomError extends Error {}
 
 class RoomManager {
   private rooms = new Map<string, InternalRoom>();
+  // Serializes async game operations (createInitialState/applyAction may await
+  // a network call, e.g. Name That Tune fetching a song) per room, so two
+  // actions arriving close together can't race and clobber each other's state.
+  private locks = new Map<string, Promise<unknown>>();
+
+  private async withLock<T>(code: string, fn: () => Promise<T>): Promise<T> {
+    const prior = this.locks.get(code) ?? Promise.resolve();
+    const run = prior.then(fn, fn);
+    this.locks.set(
+      code,
+      run.catch(() => undefined)
+    );
+    return run;
+  }
 
   private makeCode(): string {
     let code = genCode();
@@ -115,27 +129,37 @@ class RoomManager {
     this.touch(room);
   }
 
-  startGame(code: string, requesterId: PlayerId): void {
-    const room = this.getRoomOrThrow(code);
-    this.assertHost(room, requesterId);
-    if (!room.gameId) throw new RoomError("Pick a game first.");
-    const game = getGame(room.gameId);
-    if (!game) throw new RoomError("Unknown game.");
-    const players = room.playerOrder.map((id) => room.players.get(id)!).filter((p) => p.connected);
-    if (players.length < game.meta.minPlayers) throw new RoomError(`${game.meta.name} needs at least ${game.meta.minPlayers} players.`);
-    if (players.length > game.meta.maxPlayers) throw new RoomError(`${game.meta.name} supports at most ${game.meta.maxPlayers} players.`);
-    room.gameState = game.createInitialState(players);
-    room.status = "in-game";
-    this.touch(room);
+  async startGame(code: string, requesterId: PlayerId): Promise<void> {
+    return this.withLock(code, async () => {
+      const room = this.getRoomOrThrow(code);
+      this.assertHost(room, requesterId);
+      if (!room.gameId) throw new RoomError("Pick a game first.");
+      const game = getGame(room.gameId);
+      if (!game) throw new RoomError("Unknown game.");
+      const players = room.playerOrder.map((id) => room.players.get(id)!).filter((p) => p.connected);
+      if (players.length < game.meta.minPlayers) throw new RoomError(`${game.meta.name} needs at least ${game.meta.minPlayers} players.`);
+      if (players.length > game.meta.maxPlayers) throw new RoomError(`${game.meta.name} supports at most ${game.meta.maxPlayers} players.`);
+      try {
+        room.gameState = await game.createInitialState(players);
+      } catch (err) {
+        throw new RoomError(err instanceof Error ? err.message : "Failed to start the game.");
+      }
+      room.status = "in-game";
+      this.touch(room);
+    });
   }
 
-  applyGameAction(code: string, playerId: PlayerId, action: unknown): void {
+  async applyGameAction(code: string, playerId: PlayerId, action: unknown): Promise<void> {
+    return this.withLock(code, () => this.applyGameActionLocked(code, playerId, action));
+  }
+
+  private async applyGameActionLocked(code: string, playerId: PlayerId, action: unknown): Promise<void> {
     const room = this.getRoomOrThrow(code);
     if (room.status !== "in-game" || !room.gameId) throw new RoomError("No game is in progress.");
     const game = getGame(room.gameId);
     if (!game) throw new RoomError("Unknown game.");
     try {
-      room.gameState = game.applyAction(room.gameState, playerId, action);
+      room.gameState = await game.applyAction(room.gameState, playerId, action);
     } catch (err) {
       if (err instanceof GameActionError) throw new RoomError(err.message);
       throw err;
