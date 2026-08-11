@@ -59,7 +59,13 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
 - **Name That Tune** fetches real 30-second clips live from Apple's free, keyless
   [iTunes Search API](https://performance-partners.apple.com/search-api) — no
   account or API key needed. Guessing both the title and artist in one guess earns
-  bonus points.
+  bonus points. The song *pool* itself blends a small hand-picked bank (needed for
+  older-decade rounds, since charts have no decade metadata) with Apple's live,
+  publicly-published Top 100 chart RSS feeds (overall and per-genre) — the search
+  API can't return "a random song," so something has to supply candidate titles,
+  and the live charts make that pool far bigger and self-refreshing instead of
+  frozen at whatever we hand-typed. See `fetchChartBank` in
+  `lib/games/nameThatTune.ts`.
 - **Tank Arena** is the one real-time game here — everyone else is turn-based.
   WASD to move, aim/shoot with the mouse, solo free-for-all or 2 teams. The server
   runs a physics tick ~20x/second independent of player actions (see

@@ -15,7 +15,11 @@ interface SongDef {
   decade: Decade;
 }
 
-const SONG_BANK: SongDef[] = [
+// Hand-picked pool used for (a) older decades — Apple's live charts are
+// inherently "right now" and carry no decade metadata, so this is the only
+// source for 60s-2000s rounds — and (b) as a fallback if the live chart
+// fetch below fails for any reason.
+const HISTORIC_BANK: SongDef[] = [
   { title: "Billie Jean", artist: "Michael Jackson", genre: "pop", decade: "1980s" },
   { title: "Bohemian Rhapsody", artist: "Queen", genre: "rock", decade: "1970s" },
   { title: "Uptown Funk", artist: "Mark Ronson", genre: "pop", decade: "2010s" },
@@ -122,6 +126,51 @@ const playedTitles = new Set<string>();
 interface ITunesResult {
   previewUrl?: string;
   artworkUrl100?: string;
+}
+
+// Apple's classic genre IDs for their public iTunes RSS chart feeds.
+const GENRE_TO_CHART_ID: Record<Genre, number> = {
+  pop: 14,
+  rock: 21,
+  hiphop: 18,
+  country: 6,
+  rnb: 15,
+  electronic: 7,
+};
+
+interface ChartEntry {
+  "im:name"?: { label?: string };
+  "im:artist"?: { label?: string };
+}
+
+// Pulls Apple's live, publicly-published Top 100 songs chart — optionally
+// scoped to one genre via the classic iTunes RSS feed. This is free, keyless,
+// and refreshed by Apple on its own schedule, so it's both far bigger than
+// anything we could hand-type and stays current without us maintaining it.
+// Only meaningful for "now"-ish rounds — see the decade check at the call
+// site — since the chart carries no historical/decade information.
+async function fetchChartBank(genre: string, currentDecade: string): Promise<SongDef[]> {
+  const genreId = genre !== "all" ? GENRE_TO_CHART_ID[genre as Genre] : undefined;
+  const url = genreId
+    ? `https://itunes.apple.com/us/rss/topsongs/limit=100/genre=${genreId}/json`
+    : `https://itunes.apple.com/us/rss/topsongs/limit=100/json`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { feed?: { entry?: ChartEntry[] } };
+    const entries = data.feed?.entry ?? [];
+    return entries
+      .map((e) => ({ title: e["im:name"]?.label, artist: e["im:artist"]?.label }))
+      .filter((s): s is { title: string; artist: string } => Boolean(s.title && s.artist))
+      .map((s) => ({
+        title: s.title,
+        artist: s.artist,
+        genre: (genre !== "all" ? (genre as Genre) : "pop") as Genre,
+        decade: currentDecade as Decade,
+      }));
+  } catch {
+    return [];
+  }
 }
 
 async function fetchPreview(song: SongDef): Promise<{ previewUrl: string; artworkUrl: string } | null> {
@@ -264,8 +313,26 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
     const host = players.find((p) => p.isHost) ?? players[0]!;
     const genre = String(options.genre ?? "all");
     const decade = String(options.decade ?? "all");
-    let bank = SONG_BANK.filter((s) => (genre === "all" || s.genre === genre) && (decade === "all" || s.decade === decade));
-    if (bank.length < 3) bank = SONG_BANK; // filter too narrow to be playable; fall back to everything
+    const currentDecade = `${Math.floor(new Date().getFullYear() / 10) * 10}s`;
+
+    let bank = HISTORIC_BANK.filter((s) => (genre === "all" || s.genre === genre) && (decade === "all" || s.decade === decade));
+
+    // Blend in Apple's live chart when it's relevant to what was asked for —
+    // charts only cover "right now", so skip them if an older decade was
+    // explicitly requested.
+    if (decade === "all" || decade === currentDecade) {
+      const chartSongs = await fetchChartBank(genre, currentDecade);
+      const seen = new Set(bank.map((s) => `${s.title}|${s.artist}`));
+      for (const s of chartSongs) {
+        const key = `${s.title}|${s.artist}`;
+        if (!seen.has(key)) {
+          bank.push(s);
+          seen.add(key);
+        }
+      }
+    }
+
+    if (bank.length < 3) bank = HISTORIC_BANK; // filter too narrow to be playable; fall back to everything
 
     const songOrder = shuffle(bank.map((_, i) => i));
     const totalRounds = Math.min(Number(options.rounds) || DEFAULT_ROUNDS, bank.length);
