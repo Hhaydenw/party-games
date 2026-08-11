@@ -50,6 +50,64 @@ class RoomManager {
   // a network call, e.g. Name That Tune fetching a song) per room, so two
   // actions arriving close together can't race and clobber each other's state.
   private locks = new Map<string, Promise<unknown>>();
+  // Real-time games (declaring `tick` + `meta.tickIntervalMs`) get a
+  // periodic simulation step independent of player actions, e.g. tanks
+  // moving each frame rather than on discrete turns.
+  private tickIntervals = new Map<string, NodeJS.Timeout>();
+  private tickListener: ((code: string) => void) | null = null;
+
+  // Registered once by server/index.ts so a tick that changes state can
+  // trigger a broadcast without RoomManager needing to know about sockets.
+  onTick(listener: (code: string) => void) {
+    this.tickListener = listener;
+  }
+
+  private stopTicking(code: string) {
+    const handle = this.tickIntervals.get(code);
+    if (handle) {
+      clearInterval(handle);
+      this.tickIntervals.delete(code);
+    }
+  }
+
+  private maybeStartTicking(code: string) {
+    this.stopTicking(code);
+    const room = this.rooms.get(code);
+    if (!room || room.status !== "in-game" || !room.gameId) return;
+    const game = getGame(room.gameId);
+    if (!game?.tick) return;
+    const intervalMs = game.meta.tickIntervalMs ?? 50;
+    const handle = setInterval(async () => {
+      const changed = await this.tickGame(code);
+      if (!changed) {
+        this.stopTicking(code);
+        return;
+      }
+      this.tickListener?.(code);
+    }, intervalMs);
+    this.tickIntervals.set(code, handle);
+  }
+
+  private async tickGame(code: string): Promise<boolean> {
+    return this.withLock(code, async () => {
+      const room = this.rooms.get(code);
+      if (!room || room.status !== "in-game" || !room.gameId) return false;
+      const game = getGame(room.gameId);
+      if (!game?.tick) return false;
+      const intervalMs = game.meta.tickIntervalMs ?? 50;
+      room.gameState = await game.tick(room.gameState, intervalMs);
+      if (game.isGameOver(room.gameState)) {
+        room.status = "finished";
+        const winnerIds = new Set(game.getWinnerIds(room.gameState));
+        for (const pid of winnerIds) {
+          const p = room.players.get(pid);
+          if (p) p.score += 1;
+        }
+      }
+      this.touch(room);
+      return true;
+    });
+  }
 
   private async withLock<T>(code: string, fn: () => Promise<T>): Promise<T> {
     const prior = this.locks.get(code) ?? Promise.resolve();
@@ -176,6 +234,7 @@ class RoomManager {
       }
       room.status = "in-game";
       this.touch(room);
+      this.maybeStartTicking(code);
     });
   }
 
@@ -196,6 +255,7 @@ class RoomManager {
     }
     if (game.isGameOver(room.gameState)) {
       room.status = "finished";
+      this.stopTicking(code);
       const winnerIds = new Set(game.getWinnerIds(room.gameState));
       for (const pid of winnerIds) {
         const p = room.players.get(pid);
@@ -208,6 +268,7 @@ class RoomManager {
   returnToLobby(code: string, requesterId: PlayerId): void {
     const room = this.getRoomOrThrow(code);
     this.assertHost(room, requesterId);
+    this.stopTicking(code);
     room.status = "lobby";
     room.gameId = null;
     room.gameOptions = {};
@@ -258,6 +319,7 @@ class RoomManager {
     for (const [code, room] of this.rooms) {
       const allDisconnected = [...room.players.values()].every((p) => !p.connected);
       if (now - room.lastActivity > ROOM_TTL_MS || (allDisconnected && now - room.lastActivity > 30 * 60 * 1000)) {
+        this.stopTicking(code);
         this.rooms.delete(code);
       }
     }

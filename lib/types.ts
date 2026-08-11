@@ -52,6 +52,10 @@ export interface GameMeta {
   maxPlayers: number;
   comingSoon?: boolean;
   options?: GameOptionDef[];
+  // If set alongside `tick`, the room manager runs a periodic simulation
+  // step this often (ms) while the game is in progress — for real-time
+  // games (e.g. continuous movement) rather than purely turn-based ones.
+  tickIntervalMs?: number;
 }
 
 // A game plugin. `S` is the full authoritative server-side state,
@@ -66,6 +70,10 @@ export interface GameDefinition<S = unknown, V = unknown, A = unknown> {
   meta: GameMeta;
   createInitialState(players: PlayerInfo[], options: GameOptions): S | Promise<S>;
   applyAction(state: S, playerId: PlayerId, action: A): S | Promise<S>;
+  // Optional: advances a real-time game's simulation by `dtMs`, independent
+  // of any player action (e.g. moving tanks/bullets). Paired with
+  // `meta.tickIntervalMs`.
+  tick?(state: S, dtMs: number): S | Promise<S>;
   getPlayerView(state: S, playerId: PlayerId, players: PlayerInfo[]): V;
   isGameOver(state: S): boolean;
   getWinnerIds(state: S): PlayerId[];

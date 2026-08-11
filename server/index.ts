@@ -52,6 +52,11 @@ app.prepare().then(() => {
     cors: { origin: "*" },
   });
 
+  // Real-time games (e.g. Tanks) advance on a server-side timer independent
+  // of player actions; RoomManager calls back here whenever a tick changes
+  // state so it gets broadcast just like any other update.
+  roomManager.onTick((code) => broadcastRoomState(io, code));
+
   io.on("connection", (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
     socket.on("room:create", ({ name }, cb) => {
       try {

@@ -5,11 +5,26 @@ import { UnoAction, UnoCard, UnoColor, UnoView as ViewType } from "@/lib/games/u
 import { PlayerInfo } from "@/lib/types";
 
 const COLOR_BG: Record<string, string> = {
+  red: "bg-gradient-to-br from-red-500 to-red-700",
+  yellow: "bg-gradient-to-br from-yellow-300 to-yellow-500",
+  green: "bg-gradient-to-br from-emerald-500 to-emerald-700",
+  blue: "bg-gradient-to-br from-blue-500 to-blue-700",
+  wild: "bg-gradient-to-br from-red-500 via-yellow-400 via-40% to-blue-600",
+};
+
+const COLOR_TEXT: Record<string, string> = {
+  red: "text-red-600",
+  yellow: "text-yellow-500",
+  green: "text-emerald-600",
+  blue: "text-blue-600",
+  wild: "text-ink",
+};
+
+const COLOR_DOT: Record<string, string> = {
   red: "bg-red-500",
-  yellow: "bg-yellow-400 text-ink",
+  yellow: "bg-yellow-400",
   green: "bg-emerald-500",
   blue: "bg-blue-500",
-  wild: "bg-gradient-to-br from-red-500 via-yellow-400 to-blue-500",
 };
 
 const VALUE_LABEL: Record<string, string> = {
@@ -20,14 +35,41 @@ const VALUE_LABEL: Record<string, string> = {
   wild4: "+4",
 };
 
-function CardFace({ card, small }: { card: UnoCard; small?: boolean }) {
+function CardFace({ card, small, tilt = 0 }: { card: UnoCard; small?: boolean; tilt?: number }) {
+  const label = VALUE_LABEL[card.value] ?? card.value;
+  const dims = small ? "h-20 w-14" : "h-28 w-20";
   return (
     <span
-      className={`flex items-center justify-center rounded-lg font-extrabold shadow ${COLOR_BG[card.color]} ${
-        small ? "h-14 w-10 text-lg" : "h-20 w-14 text-2xl"
-      }`}
+      className={`relative inline-flex ${dims} shrink-0 flex-col justify-between rounded-xl border-[3px] border-white bg-white p-1 shadow-[0_4px_10px_rgba(0,0,0,0.5)]`}
+      style={{ transform: `rotate(${tilt}deg)` }}
     >
-      {VALUE_LABEL[card.value] ?? card.value}
+      <span className={`absolute inset-[3px] rounded-lg ${COLOR_BG[card.color]}`} />
+      <span className={`relative text-[11px] font-black leading-none text-white drop-shadow ${small ? "" : "text-sm"}`}>{label}</span>
+      <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <span
+          className={`flex -rotate-[20deg] items-center justify-center rounded-full bg-white font-black shadow-inner ${
+            small ? "h-9 w-7 text-base" : "h-14 w-10 text-2xl"
+          } ${COLOR_TEXT[card.color]}`}
+        >
+          {label}
+        </span>
+      </span>
+      <span className={`relative self-end rotate-180 text-[11px] font-black leading-none text-white drop-shadow ${small ? "" : "text-sm"}`}>{label}</span>
+    </span>
+  );
+}
+
+function CardBack({ small }: { small?: boolean }) {
+  const dims = small ? "h-20 w-14" : "h-24 w-16";
+  return (
+    <span
+      className={`relative inline-flex ${dims} shrink-0 items-center justify-center rounded-xl border-[3px] border-white shadow-[0_4px_10px_rgba(0,0,0,0.5)]`}
+      style={{
+        background:
+          "repeating-linear-gradient(45deg, #1a1a2e, #1a1a2e 6px, #e94560 6px, #e94560 12px)",
+      }}
+    >
+      <span className="flex h-8 w-8 -rotate-12 items-center justify-center rounded-full bg-gold text-lg font-black text-ink shadow">?</span>
     </span>
   );
 }
@@ -75,43 +117,58 @@ export default function UnoView({
         </p>
       )}
 
-      <div className="flex items-center justify-center gap-6">
-        <button
-          className="flex flex-col items-center gap-1 disabled:opacity-40"
-          disabled={!view.yourTurn}
-          onClick={() => onAction({ type: "draw" })}
-        >
-          <span className="flex h-20 w-14 items-center justify-center rounded-lg border-2 border-dashed border-white/30 text-xs text-slate-400">
-            Draw
-          </span>
-          <span className="text-xs text-slate-500">{view.drawPileCount} left</span>
-        </button>
+      {/* Felt table */}
+      <div
+        className="rounded-3xl border border-emerald-950/50 p-6 shadow-inner"
+        style={{ background: "radial-gradient(circle at 50% 30%, #0d5c3f, #073b28 75%)" }}
+      >
+        <div className="flex items-center justify-center gap-8">
+          <button
+            className="flex flex-col items-center gap-1.5 transition disabled:opacity-40 enabled:hover:-translate-y-1"
+            disabled={!view.yourTurn}
+            onClick={() => onAction({ type: "draw" })}
+          >
+            <CardBack />
+            <span className="text-xs font-medium text-emerald-100/80">{view.drawPileCount} left</span>
+          </button>
 
-        <div className="flex flex-col items-center gap-1">
-          {view.discardTop && <CardFace card={view.discardTop} />}
-          <span className="flex items-center gap-1 text-xs text-slate-400">
-            Current color
-            <span className={`h-3 w-3 rounded-full ${COLOR_BG[view.currentColor]}`} />
-          </span>
+          <div className="flex flex-col items-center gap-1.5">
+            {view.discardTop && <CardFace card={view.discardTop} />}
+            <span className="flex items-center gap-1.5 rounded-full bg-black/30 px-2.5 py-1 text-xs text-emerald-100/90">
+              <span className={`h-2.5 w-2.5 rounded-full ${COLOR_DOT[view.currentColor]}`} />
+              {view.currentColor}
+            </span>
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap justify-center gap-4 text-sm">
+      <div className="flex flex-wrap justify-center gap-3 text-sm">
         {view.order.map((pid) => (
-          <div key={pid} className={`rounded-xl px-3 py-1.5 ${pid === current ? "bg-accent/20" : "bg-white/5"}`}>
+          <div key={pid} className={`flex items-center gap-2 rounded-xl px-3 py-1.5 ${pid === current ? "bg-accent/20 ring-1 ring-accent/40" : "bg-white/5"}`}>
+            <span className="inline-block h-5 w-4 rounded-sm border border-white/40" style={{ background: "repeating-linear-gradient(45deg, #1a1a2e, #1a1a2e 2px, #e94560 2px, #e94560 4px)" }} />
             {nameFor(pid)}: {view.handCounts[pid]} card{view.handCounts[pid] === 1 ? "" : "s"}
           </div>
         ))}
       </div>
 
       <div>
-        <p className="mb-2 text-sm text-slate-400">Your hand</p>
-        <div className="flex flex-wrap gap-2">
-          {view.yourHand.map((card) => (
-            <button key={card.id} disabled={!view.yourTurn} onClick={() => handlePlay(card)} className="disabled:opacity-60">
-              <CardFace card={card} small />
-            </button>
-          ))}
+        <p className="mb-3 text-center text-sm text-slate-400">Your hand</p>
+        <div className="flex flex-wrap justify-center px-4 pb-2 pt-3" style={{ gap: 0 }}>
+          {view.yourHand.map((card, i) => {
+            const mid = (view.yourHand.length - 1) / 2;
+            const tilt = (i - mid) * 4;
+            return (
+              <button
+                key={card.id}
+                disabled={!view.yourTurn}
+                onClick={() => handlePlay(card)}
+                className="relative transition-transform duration-150 first:ml-0 enabled:hover:z-10 enabled:hover:-translate-y-3 disabled:opacity-60"
+                style={{ marginLeft: i === 0 ? 0 : -28, transform: `rotate(${tilt}deg)`, transformOrigin: "bottom center" }}
+              >
+                <CardFace card={card} />
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -122,12 +179,16 @@ export default function UnoView({
       </div>
 
       {pendingWildId && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/60 p-6">
+        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-6">
           <div className="card-surface rounded-2xl p-6 text-center">
             <p className="mb-4 font-semibold">Choose a color</p>
             <div className="flex gap-3">
               {(["red", "yellow", "green", "blue"] as UnoColor[]).map((c) => (
-                <button key={c} className={`h-12 w-12 rounded-full ${COLOR_BG[c]}`} onClick={() => chooseColor(c)} />
+                <button
+                  key={c}
+                  className={`h-12 w-12 rounded-full border-2 border-white/70 shadow-lg transition hover:scale-110 ${COLOR_BG[c]}`}
+                  onClick={() => chooseColor(c)}
+                />
               ))}
             </div>
           </div>

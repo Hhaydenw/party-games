@@ -12,21 +12,29 @@ games are fully implemented:
 | Game | Category | Players |
 |---|---|---|
 | **Switch** (Uno-style) | 🃏 Card | 2–8 |
-| **Connect Four** | 🎲 Board | 2 |
-| **The Game of Life** | 🎲 Board | 2–6 |
-| **Monopoly** | 🎲 Board | 2–6 |
-| **Bluff Trivia** (Fibbage-style) | 📱 Party | 3–12 |
+| **Trivia Night** | 📱 Party | 2–12 |
 | **Family Feud** | 📱 Party | 4–12 |
 | **Doodle Guess** (Pictionary/skribbl-style) | 📱 Party | 3–10 |
 | **Name That Tune** | 📱 Party | 2–12 |
+| **Tank Arena** | 📱 Party (real-time) | 2–8 |
+| **The Game of Life** | 🎲 Board | 2–6 |
+| **Monopoly** | 🎲 Board | 2–6 |
 
 Nothing is on the "coming soon" shelf right now — see
 [Adding a new game](#adding-a-new-game) if you want to keep going.
 
 The host can tune each round-based game before starting it — a **Settings** panel
-appears in the lobby once a game is picked (number of rounds; Name That Tune also
-gets genre/decade filters). Board games (Connect Four, Uno, Life, Monopoly) don't
-have a settings panel since they play to a win condition rather than N rounds.
+appears in the lobby once a game is picked (rounds; Trivia Night also gets
+category/difficulty; Name That Tune gets genre/decade; Tank Arena gets solo-vs-teams
+and match length). Board games (Uno, Life, Monopoly) don't have a settings panel
+since they play to a win condition rather than N rounds.
+
+**Freshness**: every trivia/question/song-based game is designed not to repeat
+itself. Trivia Night pulls live from a database of thousands of real questions.
+Family Feud has 100+ original questions and tracks which ones it's already asked,
+across games, for as long as the server keeps running. Name That Tune does the
+same for songs. None of these reset until their pool is exhausted, and even then
+they only start reusing — they never *guarantee* a repeat within a normal night.
 
 **Known simplifications**, called out here rather than hidden:
 - **Monopoly** has real trading (propose/accept/decline, cash + properties both
@@ -42,14 +50,30 @@ have a settings panel since they play to a win condition rather than N rounds.
 - **Family Feud**'s face-off is a real buzz-in: first captain to buzz gets the
   first guess, and if they miss it passes to the other captain. Guessing while in
   control rotates through your team in order rather than letting everyone answer
-  at once, and the full survey reveals at the end of every round.
+  at once, and the full survey reveals at the end of every round. The question
+  bank is original (written in the show's style, not scraped from broadcasts) —
+  see [Family Feud content note](#family-feud-content-note) below.
+- **Trivia Night** is powered live by the free, keyless
+  [Open Trivia Database](https://opentdb.com) — real questions across categories
+  and difficulties, no account or API key needed.
 - **Name That Tune** fetches real 30-second clips live from Apple's free, keyless
   [iTunes Search API](https://performance-partners.apple.com/search-api) — no
-  account or API key needed, but it does mean that game needs your server to have
-  outbound internet access (fine on Render/any normal host). It tracks which songs
-  have already played (across games, for as long as the server process stays up)
-  so you won't hear the same song twice in a row across sessions, and guessing
-  both the title and artist in one guess earns bonus points.
+  account or API key needed. Guessing both the title and artist in one guess earns
+  bonus points.
+- **Tank Arena** is the one real-time game here — everyone else is turn-based.
+  WASD to move, aim/shoot with the mouse, solo free-for-all or 2 teams. The server
+  runs a physics tick ~20x/second independent of player actions (see
+  [How it's built](#how-its-built)) rather than reacting only to discrete moves.
+
+### Family Feud content note
+
+The question bank (100+ prompts) was written originally, in the style of the show's
+typical categories (daily life, food, work, family, etc.) rather than scraped
+verbatim from broadcast episodes or a compiled third-party database of exact
+show answers and point values — that avoids bulk-copying copyrighted material
+while still giving you the real Family Feud *feel*. If you'd rather have exact
+answers from real episodes, you'd need to source and license that data yourself
+and swap it into `lib/games/familyFeud.ts`'s `QUESTION_BANK`.
 
 ## Running it locally
 
@@ -104,11 +128,18 @@ survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-me
   `GameDefinition` interface (`lib/types.ts`) — functions for creating state,
   applying a validated action, and producing a per-player "view" that hides
   information the player shouldn't see (e.g. opponents' Uno hands, other players'
-  bluff answers before voting). Most games are pure and synchronous; a game can
-  also return a `Promise` from `createInitialState`/`applyAction` if it needs to
-  await something external (Name That Tune awaits the iTunes API for each song).
-  `lib/rooms.ts` serializes a room's actions so two async operations for the same
-  room can't race each other.
+  survey answers before they're revealed). Most games are pure, synchronous, and
+  turn-based; a game can also return a `Promise` from `createInitialState`/
+  `applyAction` if it needs to await something external (Trivia Night and Name
+  That Tune await a public API). `lib/rooms.ts` serializes a room's actions so two
+  async operations for the same room can't race each other.
+- **Real-time games**: a game can optionally implement `tick(state, dtMs)` and set
+  `meta.tickIntervalMs`; `lib/rooms.ts` then runs that game's physics step on a
+  timer (independent of player actions) and broadcasts whenever it changes state.
+  Tank Arena is the only game using this so far — everything else reacts only to
+  discrete player actions. Players stream continuous state (which keys are held,
+  where the mouse is aiming) as regular actions; the tick loop is what actually
+  moves things and resolves hits.
 - **`components/`**: lobby, invite link, chat, and one view component per game.
 - Games can declare `meta.options` (a number or select field, e.g. "Rounds" or
   "Genre") and the lobby renders controls for them automatically
@@ -124,7 +155,8 @@ used to silently reconnect via a `room:rejoin` socket event.
 1. Create `lib/games/yourgame.ts` implementing `GameDefinition<State, View, Action>`
    from `lib/types.ts`: `createInitialState`, `applyAction` (throw `GameActionError`
    for illegal moves), `getPlayerView` (strip anything the player shouldn't see),
-   `isGameOver`, `getWinnerIds`.
+   `isGameOver`, `getWinnerIds`. For a real-time game, also implement `tick` and
+   set `meta.tickIntervalMs`.
 2. Register it in `lib/games/registry.ts`.
 3. Add a view component in `components/games/YourGameView.tsx` and wire it into
    `components/GameHost.tsx`'s dispatcher.
