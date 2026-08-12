@@ -169,6 +169,9 @@ export interface TriviaView {
   totalPlayers: number;
   roundEndsAt: number | null;
   scores: { playerId: PlayerId; score: number }[];
+  // Who picked what, revealed once the round ends — null (not just missing)
+  // for anyone who never answered in time.
+  allAnswers: { playerId: PlayerId; optionIndex: number | null }[] | null;
 }
 
 export type TriviaAction = { type: "answer"; optionIndex: number } | { type: "timeUp" } | { type: "advance" };
@@ -274,6 +277,9 @@ export const trivia: GameDefinition<TriviaState, TriviaView, TriviaAction> = {
       totalPlayers: state.playerIds.length,
       roundEndsAt: state.roundEndsAt,
       scores: state.playerIds.map((pid) => ({ playerId: pid, score: state.scores[pid] ?? 0 })),
+      allAnswers: revealed
+        ? state.playerIds.map((pid) => ({ playerId: pid, optionIndex: state.answers[pid]?.optionIndex ?? null }))
+        : null,
     };
   },
   isGameOver(state) {

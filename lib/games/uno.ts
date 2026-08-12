@@ -9,6 +9,15 @@ export interface UnoCard {
   value: UnoValue;
 }
 
+// When the "stacking" house rule is on, a draw2/wild4 doesn't resolve
+// immediately — it becomes a pending draw that the next player can either
+// escalate by stacking a matching card, or must absorb by drawing the
+// accumulated total (and losing their turn).
+export interface PendingDraw {
+  kind: "draw2" | "wild4";
+  count: number;
+}
+
 export interface UnoState {
   drawPile: UnoCard[];
   discardPile: UnoCard[];
@@ -17,6 +26,8 @@ export interface UnoState {
   turnIndex: number;
   direction: 1 | -1;
   currentColor: UnoColor;
+  stackingEnabled: boolean;
+  pendingDraw: PendingDraw | null;
   winnerId: PlayerId | null;
   log: string[];
 }
@@ -29,6 +40,8 @@ export interface UnoView {
   order: PlayerId[];
   turnIndex: number;
   currentColor: UnoColor;
+  stackingEnabled: boolean;
+  pendingDraw: PendingDraw | null;
   yourTurn: boolean;
   winnerId: PlayerId | null;
   log: string[];
@@ -88,7 +101,14 @@ function drawCards(drawPile: UnoCard[], discardPile: UnoCard[], n: number) {
   return { draw, discard, drawn };
 }
 
-function playable(card: UnoCard, top: UnoCard, currentColor: UnoColor): boolean {
+// Exported so the client can compute "do I have any legal play?" itself and
+// auto-draw on the player's behalf instead of leaving them stuck.
+export function isPlayable(card: UnoCard, top: UnoCard, currentColor: UnoColor, pendingDraw: PendingDraw | null): boolean {
+  if (pendingDraw) {
+    // Under a pending stack, only a matching draw card keeps it going —
+    // even a wild can't get you out of it.
+    return card.value === pendingDraw.kind;
+  }
   if (card.color === "wild") return true;
   return card.color === currentColor || card.value === top.value;
 }
@@ -101,8 +121,20 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
     category: "card",
     minPlayers: 2,
     maxPlayers: 8,
+    options: [
+      {
+        key: "stacking",
+        label: "House rule: stack +2/+4",
+        type: "select",
+        choices: [
+          { value: "off", label: "Off (classic)" },
+          { value: "on", label: "On — stack matching draw cards" },
+        ],
+        default: "off",
+      },
+    ],
   },
-  createInitialState(players) {
+  createInitialState(players, options) {
     let deck = shuffle(buildDeck());
     const hands: Record<PlayerId, UnoCard[]> = {};
     for (const p of players) {
@@ -124,6 +156,8 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
       turnIndex: 0,
       direction: 1,
       currentColor: discardTop.color as UnoColor,
+      stackingEnabled: options?.stacking === "on",
+      pendingDraw: null,
       winnerId: null,
       log: [`Game started. Top card: ${discardTop.color} ${discardTop.value}.`],
     };
@@ -139,7 +173,10 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
     const top = state.discardPile[state.discardPile.length - 1]!;
 
     if (action.type === "draw") {
-      const { draw, discard, drawn } = drawCards(state.drawPile, state.discardPile, 1);
+      // A pending stack (house rule) forces drawing the accumulated total
+      // and skips this player's turn instead of a normal single draw.
+      const drawCount = state.pendingDraw?.count ?? 1;
+      const { draw, discard, drawn } = drawCards(state.drawPile, state.discardPile, drawCount);
       const newHand = [...hand, ...drawn];
       const nextIndex = (state.turnIndex + state.direction + order.length) % order.length;
       return {
@@ -148,7 +185,8 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
         discardPile: discard,
         hands: { ...state.hands, [playerId]: newHand },
         turnIndex: nextIndex,
-        log: [...state.log, `${playerId} drew a card.`],
+        pendingDraw: null,
+        log: [...state.log, state.pendingDraw ? `${playerId} draws ${drawCount} and is skipped.` : `${playerId} drew a card.`],
       };
     }
 
@@ -156,7 +194,11 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
       const idx = hand.findIndex((c) => c.id === action.cardId);
       if (idx === -1) throw new GameActionError("You don't have that card.");
       const played = hand[idx]!;
-      if (!playable(played, top, state.currentColor)) throw new GameActionError("That card doesn't match.");
+      if (!isPlayable(played, top, state.currentColor, state.pendingDraw)) {
+        throw new GameActionError(
+          state.pendingDraw ? `You must stack another ${state.pendingDraw.kind === "draw2" ? "+2" : "+4"} or draw ${state.pendingDraw.count}.` : "That card doesn't match."
+        );
+      }
       if (played.color === "wild" && !action.chosenColor) throw new GameActionError("Choose a color for that wild card.");
 
       const newHand = hand.slice(0, idx).concat(hand.slice(idx + 1));
@@ -181,6 +223,7 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
       let discardPile = newDiscard;
       let log = [...state.log, `${playerId} played ${played.color} ${played.value}.`];
       let hands = newHands;
+      let pendingDraw: PendingDraw | null = null;
 
       const advance = (steps: number) => (turnIndex + direction * steps + order.length * 4) % order.length;
 
@@ -197,23 +240,35 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
           }
           break;
         case "draw2": {
-          const victim = order[advance(1)]!;
-          const res = drawCards(drawPile, discardPile, 2);
-          drawPile = res.draw;
-          discardPile = res.discard;
-          hands = { ...hands, [victim]: [...(hands[victim] ?? []), ...res.drawn] };
-          log = [...log, `${victim} draws 2 and is skipped.`];
-          turnIndex = advance(2);
+          if (state.stackingEnabled) {
+            pendingDraw = { kind: "draw2", count: (state.pendingDraw?.count ?? 0) + 2 };
+            log = [...log, `+2! Stacked total: ${pendingDraw.count}.`];
+            turnIndex = advance(1);
+          } else {
+            const victim = order[advance(1)]!;
+            const res = drawCards(drawPile, discardPile, 2);
+            drawPile = res.draw;
+            discardPile = res.discard;
+            hands = { ...hands, [victim]: [...(hands[victim] ?? []), ...res.drawn] };
+            log = [...log, `${victim} draws 2 and is skipped.`];
+            turnIndex = advance(2);
+          }
           break;
         }
         case "wild4": {
-          const victim = order[advance(1)]!;
-          const res = drawCards(drawPile, discardPile, 4);
-          drawPile = res.draw;
-          discardPile = res.discard;
-          hands = { ...hands, [victim]: [...(hands[victim] ?? []), ...res.drawn] };
-          log = [...log, `${victim} draws 4 and is skipped.`];
-          turnIndex = advance(2);
+          if (state.stackingEnabled) {
+            pendingDraw = { kind: "wild4", count: (state.pendingDraw?.count ?? 0) + 4 };
+            log = [...log, `+4! Stacked total: ${pendingDraw.count}.`];
+            turnIndex = advance(1);
+          } else {
+            const victim = order[advance(1)]!;
+            const res = drawCards(drawPile, discardPile, 4);
+            drawPile = res.draw;
+            discardPile = res.discard;
+            hands = { ...hands, [victim]: [...(hands[victim] ?? []), ...res.drawn] };
+            log = [...log, `${victim} draws 4 and is skipped.`];
+            turnIndex = advance(2);
+          }
           break;
         }
         case "wild":
@@ -228,6 +283,7 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
         hands,
         drawPile,
         discardPile,
+        pendingDraw,
         direction,
         turnIndex,
         currentColor: resolvedColor,
@@ -248,6 +304,8 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
       order: state.order,
       turnIndex: state.turnIndex,
       currentColor: state.currentColor,
+      stackingEnabled: state.stackingEnabled,
+      pendingDraw: state.pendingDraw,
       yourTurn: state.order[state.turnIndex] === playerId && !state.winnerId,
       winnerId: state.winnerId,
       log: state.log.slice(-8),

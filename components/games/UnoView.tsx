@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { UnoAction, UnoCard, UnoColor, UnoView as ViewType } from "@/lib/games/uno";
+import { UnoAction, UnoCard, UnoColor, UnoView as ViewType, isPlayable } from "@/lib/games/uno";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
 
@@ -112,6 +112,21 @@ export default function UnoView({
     }
   }, [view.winnerId, meId]);
 
+  const canPlay = (card: UnoCard) => Boolean(view.discardTop) && isPlayable(card, view.discardTop!, view.currentColor, view.pendingDraw);
+  const hasPlayableCard = view.yourHand.some(canPlay);
+
+  // Auto-draw when it's your turn and nothing in your hand is legal to
+  // play, instead of leaving you stuck staring at an unplayable hand. A
+  // short delay lets you actually see why before it happens.
+  useEffect(() => {
+    if (!view.yourTurn || view.winnerId || hasPlayableCard) return;
+    const t = setTimeout(() => {
+      playSound("draw");
+      onAction({ type: "draw" });
+    }, 900);
+    return () => clearTimeout(t);
+  }, [view.yourTurn, view.winnerId, hasPlayableCard, onAction]);
+
   function handlePlay(card: UnoCard) {
     if (!view.yourTurn) return;
     if (card.color === "wild") {
@@ -133,10 +148,16 @@ export default function UnoView({
       ) : (
         <p className="text-center text-lg">
           {view.yourTurn ? (
-            <span className="font-bold text-accent">Your turn</span>
+            <span className="font-bold text-accent">Your turn{!hasPlayableCard && " — no playable card, drawing…"}</span>
           ) : (
             <span className="text-slate-400">Waiting on {nameFor(current!)}…</span>
           )}
+        </p>
+      )}
+
+      {view.pendingDraw && !view.winnerId && (
+        <p className="text-center text-sm font-semibold text-accent">
+          ⚠️ +{view.pendingDraw.count} pending — stack a matching {view.pendingDraw.kind === "draw2" ? "+2" : "+4"} or draw {view.pendingDraw.count}
         </p>
       )}
 
@@ -183,12 +204,15 @@ export default function UnoView({
           {view.yourHand.map((card, i) => {
             const mid = (view.yourHand.length - 1) / 2;
             const tilt = (i - mid) * 4;
+            const playableNow = canPlay(card);
             return (
               <button
                 key={card.id}
-                disabled={!view.yourTurn}
+                disabled={!view.yourTurn || !playableNow}
                 onClick={() => handlePlay(card)}
-                className="relative transition-transform duration-150 first:ml-0 enabled:hover:z-10 enabled:hover:-translate-y-3 disabled:opacity-60"
+                className={`relative transition-transform duration-150 first:ml-0 enabled:hover:z-10 enabled:hover:-translate-y-3 disabled:opacity-60 ${
+                  view.yourTurn && !playableNow ? "grayscale" : ""
+                }`}
                 style={{ marginLeft: i === 0 ? 0 : -28, transform: `rotate(${tilt}deg)`, transformOrigin: "bottom center" }}
               >
                 <CardFace card={card} />

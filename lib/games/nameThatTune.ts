@@ -7,7 +7,14 @@ import { DECADE_CHOICES, GENRE_CHOICES, SongResult, searchSongs } from "./songSo
 // call — see `lib/games/songSource.ts`), everyone races to type the title
 // (and artist, for a bonus), points awarded by guess order.
 
-const ROUND_MS = 25_000;
+// This is a safety cap, not the primary round-end trigger — the actual
+// round ends when the clip finishes playing (the client fires `timeUp` on
+// the <audio> element's `ended` event) so the guess window always lines up
+// with however long that particular preview clip actually is, rather than
+// a fixed guess that could cut a longer clip off early. This cap only
+// matters if playback never starts/finishes for some reason (autoplay
+// blocked, network hiccup).
+const ROUND_MS = 60_000;
 const DEFAULT_ROUNDS = 8;
 
 // Tracks song titles already played, across games, for the lifetime of this
@@ -47,6 +54,7 @@ export interface NameThatTuneState {
   title: string;
   artist: string;
   previewUrl: string;
+  artworkUrl: string | null;
   phase: TunePhase;
   guesses: GuessLogEntry[];
   correctGuessers: PlayerId[];
@@ -61,6 +69,7 @@ export interface NameThatTuneView {
   previewUrl: string;
   revealedTitle: string | null;
   revealedArtist: string | null;
+  revealedArtworkUrl: string | null;
   phase: TunePhase;
   guesses: { id: string; playerId: PlayerId; text: string | null; correct: boolean; bothBonus: boolean; at: number }[];
   correctGuessers: PlayerId[];
@@ -80,12 +89,65 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+const ONES_WORDS: Record<string, number> = {
+  zero: 0,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+};
+const TENS_WORDS: Record<string, number> = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+
+// Rewrites number words to digits ("three" -> "3", "twenty one" -> "21") so
+// a guess doesn't fail just because someone typed the numeral a song title
+// spells out, or vice versa (e.g. "3 Days Grace" vs "Three Days Grace").
+function wordsToDigits(text: string): string {
+  const words = text.split(" ");
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    const nextVal = ONES_WORDS[words[i + 1] ?? ""];
+    if (TENS_WORDS[w] !== undefined && nextVal !== undefined && nextVal < 10) {
+      out.push(String(TENS_WORDS[w]! + nextVal));
+      i++;
+    } else if (TENS_WORDS[w] !== undefined) {
+      out.push(String(TENS_WORDS[w]));
+    } else if (ONES_WORDS[w] !== undefined) {
+      out.push(String(ONES_WORDS[w]));
+    } else if (w === "hundred" && out.length > 0 && /^\d+$/.test(out[out.length - 1]!)) {
+      out[out.length - 1] = String(Number(out[out.length - 1]) * 100);
+    } else {
+      out.push(w);
+    }
+  }
+  return out.join(" ");
+}
+
 function normalize(s: string): string {
-  return s
+  const cleaned = s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // strip accents/diacritics (é, è, ñ, ö, ...) so near-misses still match
     .toLowerCase()
     .trim()
     .replace(/^(a|an|the)\s+/, "")
-    .replace(/[^a-z0-9 ]/g, "");
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ");
+  return wordsToDigits(cleaned);
 }
 
 function matches(guess: string, target: string): boolean {
@@ -155,6 +217,7 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
       title: first.song.title,
       artist: first.song.artist,
       previewUrl: first.song.previewUrl,
+      artworkUrl: first.song.artworkUrl,
       phase: "guessing",
       guesses: [],
       correctGuessers: [],
@@ -214,6 +277,7 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
         title: next.song.title,
         artist: next.song.artist,
         previewUrl: next.song.previewUrl,
+        artworkUrl: next.song.artworkUrl,
         phase: "guessing",
         guesses: [],
         correctGuessers: [],
@@ -233,6 +297,7 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
       previewUrl: state.previewUrl,
       revealedTitle: revealed ? state.title : null,
       revealedArtist: revealed ? state.artist : null,
+      revealedArtworkUrl: revealed ? state.artworkUrl : null,
       phase: state.phase,
       guesses: state.guesses.map((g) => ({
         id: g.id,

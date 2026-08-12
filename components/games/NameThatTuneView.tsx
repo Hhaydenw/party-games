@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NameThatTuneAction, NameThatTuneView as ViewType } from "@/lib/games/nameThatTune";
 import { PlayerInfo } from "@/lib/types";
-import { playSound } from "@/lib/sound";
+import { playSound, getSoundSettings, subscribeSoundSettings } from "@/lib/sound";
 
 export default function NameThatTuneView({
   view,
@@ -25,17 +25,65 @@ export default function NameThatTuneView({
 
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
+  // The preview clip's own playback volume follows the same persisted
+  // volume the rest of the app's sound uses (see lib/sound.ts) — so it
+  // starts well below max instead of the browser's default 100%, and stays
+  // that way across rounds/games instead of resetting each time.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.volume = getSoundSettings().volume;
+    return subscribeSoundSettings(() => {
+      if (audioRef.current) audioRef.current.volume = getSoundSettings().volume;
+    });
+  }, []);
+
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || view.phase !== "guessing") return;
+    let cancelled = false;
+    function startAtHook() {
+      if (cancelled || !audio) return;
+      // We don't have real hook/timestamp data for where a song's most
+      // recognizable moment falls, so this is a light heuristic — nudge
+      // past a small fraction of the clip (most preview clips front-load a
+      // representative section already) rather than always starting at
+      // dead silence/count-in. Capped low so it never skips meaningfully
+      // into the clip.
+      const offset = Number.isFinite(audio.duration) ? Math.min(8, audio.duration * 0.15) : 0;
+      if (offset > 0) audio.currentTime = offset;
+      audio.play().catch(() => {
+        // Autoplay was blocked; the visible play button on the record covers this case.
+      });
+    }
     audio.currentTime = 0;
-    audio.play().catch(() => {
-      // Autoplay was blocked; the visible play button on the record covers this case.
-    });
+    if (audio.readyState >= 1) startAtHook();
+    else audio.addEventListener("loadedmetadata", startAtHook, { once: true });
+    return () => {
+      cancelled = true;
+      audio.removeEventListener("loadedmetadata", startAtHook);
+    };
   }, [view.previewUrl, view.phase]);
 
+  // The round ends when the clip actually finishes playing, so the guess
+  // window always lines up with however long that clip really is, instead
+  // of a fixed guess that could cut a longer clip off early.
+  function handleEnded() {
+    setIsPlaying(false);
+    if (isHost && view.phase === "guessing" && !firedTimeUp.current) {
+      firedTimeUp.current = true;
+      onAction({ type: "timeUp" });
+    }
+  }
+
+  // Fallback only — in case playback never starts/finishes (autoplay
+  // blocked, network hiccup). A short grace period after the round starts
+  // avoids a spurious instant fire from any clock skew between server and
+  // client right as a fresh round begins.
+  const roundStartedAt = useRef(Date.now());
   useEffect(() => {
     firedTimeUp.current = false;
+    roundStartedAt.current = Date.now();
     if (!view.roundEndsAt) {
       setRemainingMs(null);
       return;
@@ -43,7 +91,8 @@ export default function NameThatTuneView({
     const tick = () => {
       const remaining = Math.max(0, view.roundEndsAt! - Date.now());
       setRemainingMs(remaining);
-      if (remaining === 0 && isHost && !firedTimeUp.current) {
+      const pastGracePeriod = Date.now() - roundStartedAt.current > 2000;
+      if (remaining === 0 && pastGracePeriod && isHost && !firedTimeUp.current) {
         firedTimeUp.current = true;
         onAction({ type: "timeUp" });
       }
@@ -124,7 +173,7 @@ export default function NameThatTuneView({
           className="w-full max-w-xs"
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
-          onEnded={() => setIsPlaying(false)}
+          onEnded={handleEnded}
         />
 
         {remainingMs !== null && view.phase === "guessing" && (
@@ -172,12 +221,17 @@ export default function NameThatTuneView({
 
       {revealed && (
         <div className="flex flex-col items-center gap-3">
-          <div className="rounded-2xl border border-gold/30 bg-gold/5 px-6 py-4 text-center [animation:feud-pop_0.4s_ease-out]">
-            <p className="text-xs uppercase tracking-widest text-slate-500">Now revealing</p>
-            <p className="mt-1 text-lg font-bold">
-              <span className="text-gold">{view.revealedTitle}</span>
-            </p>
-            <p className="text-sm text-slate-400">by {view.revealedArtist}</p>
+          <div className="flex items-center gap-4 rounded-2xl border border-gold/30 bg-gold/5 px-6 py-4 text-center [animation:feud-pop_0.4s_ease-out]">
+            {view.revealedArtworkUrl && (
+              <img src={view.revealedArtworkUrl} alt="" className="h-16 w-16 shrink-0 rounded-lg shadow-lg" />
+            )}
+            <div>
+              <p className="text-xs uppercase tracking-widest text-slate-500">Now revealing</p>
+              <p className="mt-1 text-lg font-bold">
+                <span className="text-gold">{view.revealedTitle}</span>
+              </p>
+              <p className="text-sm text-slate-400">by {view.revealedArtist}</p>
+            </div>
           </div>
           <div className="flex flex-wrap justify-center gap-3 text-sm">
             {[...view.scores]

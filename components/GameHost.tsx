@@ -2,17 +2,7 @@
 
 import { PlayerInfo, RoomSummary } from "@/lib/types";
 import { useParty } from "@/lib/socketClient";
-import UnoView from "@/components/games/UnoView";
-import TriviaView from "@/components/games/TriviaView";
-import DrawingView from "@/components/games/DrawingView";
-import FamilyFeudView from "@/components/games/FamilyFeudView";
-import NameThatTuneView from "@/components/games/NameThatTuneView";
-import LifeView from "@/components/games/LifeView";
-import MonopolyView from "@/components/games/MonopolyView";
-import TanksView from "@/components/games/TanksView";
-import PaddleBattleView from "@/components/games/PaddleBattleView";
-import VoidRaidersView from "@/components/games/VoidRaidersView";
-import WildestAnswerView from "@/components/games/WildestAnswerView";
+import GameView from "@/components/GameView";
 import PlayerList from "@/components/PlayerList";
 import SoundSettingsButton from "@/components/SoundSettingsButton";
 
@@ -48,33 +38,7 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
 
       <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
         <section className="card-surface rounded-3xl p-6">
-          {gameView.gameId === "uno" && (
-            <UnoView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
-          )}
-          {gameView.gameId === "trivia" && (
-            <TriviaView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
-          )}
-          {gameView.gameId === "drawing" && (
-            <DrawingView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
-          )}
-          {gameView.gameId === "family-feud" && (
-            <FamilyFeudView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
-          )}
-          {gameView.gameId === "name-that-tune" && (
-            <NameThatTuneView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
-          )}
-          {gameView.gameId === "life" && <LifeView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}
-          {gameView.gameId === "monopoly" && <MonopolyView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}
-          {gameView.gameId === "tanks" && <TanksView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}
-          {gameView.gameId === "paddle-battle" && (
-            <PaddleBattleView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
-          )}
-          {gameView.gameId === "void-raiders" && (
-            <VoidRaidersView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
-          )}
-          {gameView.gameId === "wildest-answer" && (
-            <WildestAnswerView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
-          )}
+          <GameView gameId={gameView.gameId} view={gameView.view} onAction={sendAction} meId={me.id} players={room.players} />
         </section>
         <aside className="card-surface h-fit rounded-3xl p-4">
           <h3 className="mb-3 text-sm font-semibold text-slate-300">Players</h3>

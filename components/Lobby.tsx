@@ -101,6 +101,24 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
             <h3 className="mb-3 text-sm font-semibold text-slate-300">Players ({room.players.length})</h3>
             <PlayerList players={room.players} meId={me.id} />
           </div>
+          {room.players.some((p) => p.score > 0) && (
+            <div className="card-surface rounded-3xl p-4">
+              <h3 className="mb-3 text-sm font-semibold text-slate-300">🏆 Session standings</h3>
+              <ul className="flex flex-col gap-1.5 text-sm">
+                {[...room.players]
+                  .sort((a, b) => b.score - a.score)
+                  .map((p) => (
+                    <li key={p.id} className="flex items-center justify-between">
+                      <span className={p.id === me.id ? "font-semibold text-gold" : "text-slate-300"}>{p.name}</span>
+                      <span className="text-slate-400">
+                        {p.score} win{p.score === 1 ? "" : "s"}
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+              <p className="mt-2 text-[11px] text-slate-500">Wins across every game played in this room tonight.</p>
+            </div>
+          )}
           <ChatBox meId={me.id} />
         </aside>
       </div>

@@ -32,6 +32,14 @@ volume/mute controls, saved per-browser via `localStorage`.
 Nothing is on the "coming soon" shelf right now — see
 [Adding a new game](#adding-a-new-game) if you want to keep going.
 
+**After a game ends**, you see that game's own final scoreboard — the same
+rich per-game view you had while playing (points, kills, net worth, whatever
+was relevant to what you just played), not a generic room-wide tally. The
+host gets a **🔁 Play again** button that restarts the same game immediately
+(no need to revisit the lobby), plus a **Back to lobby** button. The lobby
+separately tracks **session standings** — wins across every game played in
+that room — so that info isn't lost, it just lives in the right place.
+
 The host can tune each round-based game before starting it — a **Settings** panel
 appears in the lobby once a game is picked (rounds; Trivia Night also gets
 category/difficulty; Name That Tune gets genre/decade; Tank Arena and Void
@@ -69,19 +77,44 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   see [Family Feud content note](#family-feud-content-note) below.
 - **Trivia Night** is powered live by the free, keyless
   [Open Trivia Database](https://opentdb.com) — real questions across categories
-  and difficulties, no account or API key needed.
+  and difficulties, no account or API key needed. Once a round ends, everyone
+  sees a "who picked what" breakdown — each player's chosen answer letter and
+  whether it was right — not just the final scores.
+- **Switch** (Uno) auto-draws for you if nothing in your hand is legal to play
+  (after a short pause so you can see why), instead of leaving you stuck. The
+  host can also turn on a **stacking house rule** before starting: a +2 or +4
+  becomes a pending draw that the next player can escalate by playing a
+  matching draw card, or must absorb (drawing the accumulated total and
+  losing their turn) — off by default, matching classic rules.
 - **Name That Tune** pulls its song pool from Apple's free, keyless
   [iTunes Search API](https://performance-partners.apple.com/search-api) — no
   account or API key, no stored song list at all. When a genre/decade is
-  picked, the server searches iTunes directly with a query like "1980s rock
-  hits"; the *search itself* is the source of "biggest songs of that decade and
-  genre", and the same call returns each hit's real 30-second preview clip, so
-  there's no separate storage or lookup step (see `lib/games/songSource.ts`).
-  This is best-effort, not an exact chart — iTunes has no true decade filter,
-  so relevance comes from the query wording rather than certified chart data;
-  a filter also screens out lullaby/karaoke/tribute-album covers that otherwise
-  rank surprisingly high for generic "hits" searches. Guess the title/artist —
-  guessing both in one guess earns bonus points.
+  picked, the server searches iTunes directly (`country=US`, so results are
+  scoped to the US storefront/catalog) with a query like "1980s rock hits";
+  the *search itself* is the source of "biggest songs of that decade and
+  genre", and the same call returns each hit's real preview clip and cover
+  art, so there's no separate storage or lookup step (see
+  `lib/games/songSource.ts`). Results are also filtered against Apple's own
+  `primaryGenreName` metadata (not just the search text), which is what keeps
+  "Electronic" from pulling in R&B tracks that merely matched the query
+  wording. Two genre-ish options round out the list: **Billboard Hits** and
+  **TV Show Songs**. Guess the title or artist — guessing both in one guess
+  earns bonus points — and matching is forgiving of accented characters
+  ("café" vs "cafe") and digit/word numbers ("3 Days Grace" vs "Three Days
+  Grace"). The round now ends when the clip actually finishes playing (the
+  client listens for the `<audio>` element's `ended` event) rather than a
+  fixed guess-window timer that could cut a longer clip off early; a generous
+  fixed cap is still there as a fallback in case playback never starts.
+  Playback also nudges a little past the very start of the clip rather than
+  always beginning at dead air — there's no real "hook" timestamp data
+  available for free, so this is a light heuristic (skip a small, capped
+  fraction of the clip), not exact hook detection. The preview clip's own
+  volume follows the same persisted setting as the rest of the app's sound
+  (see `lib/sound.ts`) instead of resetting to the browser's max every round.
+  This is all still best-effort, not an exact chart — iTunes has no true
+  decade filter, so relevance comes from the query wording rather than
+  certified chart data; a filter also screens out lullaby/karaoke/tribute-album
+  covers that otherwise rank surprisingly high for generic "hits" searches.
 - **Tank Arena**, **Paddle Battle**, and **Void Raiders** are the real-time
   games here — everyone else is turn-based. All three run on the server's
   physics tick loop (see [How it's built](#how-its-built)) rather than
@@ -202,7 +235,10 @@ used to silently reconnect via a `room:rejoin` socket event.
    set `meta.tickIntervalMs`.
 2. Register it in `lib/games/registry.ts`.
 3. Add a view component in `components/games/YourGameView.tsx` and wire it into
-   `components/GameHost.tsx`'s dispatcher.
+   `components/GameView.tsx`'s dispatcher — shared by `GameHost.tsx` (while
+   playing) and `FinishedBanner.tsx` (frozen on the final tick after the game
+   ends), so your view's own "game over" state doubles as the post-game
+   scoreboard for free.
 
 The room/socket/reconnect layer needs no changes — that's the whole point of the
 plugin split.

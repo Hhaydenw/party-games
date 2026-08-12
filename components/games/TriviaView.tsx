@@ -96,6 +96,27 @@ export default function TriviaView({
         </p>
       )}
 
+      {(view.phase === "reveal" || view.phase === "finished") && view.allAnswers && (
+        <div className="flex w-full max-w-lg flex-col gap-1.5">
+          <p className="text-center text-[11px] uppercase tracking-widest text-slate-500">Who picked what</p>
+          {view.allAnswers.map((a) => {
+            const correct = a.optionIndex !== null && a.optionIndex === view.correctIndex;
+            return (
+              <div key={a.playerId} className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-1.5 text-sm">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10 text-[10px] font-bold">
+                  {a.optionIndex !== null ? LETTERS[a.optionIndex] : "–"}
+                </span>
+                <span className="truncate">{nameFor(a.playerId)}</span>
+                <span className="ml-auto shrink-0 text-xs text-slate-400">
+                  {a.optionIndex === null ? "No answer" : view.options[a.optionIndex]}
+                </span>
+                <span className="shrink-0">{correct ? "✅" : a.optionIndex !== null ? "❌" : ""}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {(view.phase === "reveal" || view.phase === "finished") && (
         <div className="flex flex-col items-center gap-3">
           <div className="flex flex-wrap justify-center gap-3 text-sm">

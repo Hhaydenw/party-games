@@ -11,7 +11,7 @@ export default function PlayerList({ players, meId }: { players: PlayerInfo[]; m
             {p.id === meId && <span className="text-slate-500"> (you)</span>}
           </span>
           {p.isHost && <span className="ml-auto text-xs text-gold">👑 host</span>}
-          {p.score > 0 && <span className="ml-auto text-xs text-slate-400">{p.score} pt{p.score === 1 ? "" : "s"}</span>}
+          {p.score > 0 && <span className="ml-auto text-xs text-slate-400">🏆 {p.score} win{p.score === 1 ? "" : "s"}</span>}
         </li>
       ))}
     </ul>
