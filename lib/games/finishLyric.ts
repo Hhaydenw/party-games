@@ -1,13 +1,21 @@
 import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/types";
 import { DECADE_CHOICES, GENRE_CHOICES, SongResult, searchSongs } from "./songSource";
 
-// "Finish the Lyric": a real 30-second clip plays, and one line from that
-// song's actual lyrics is shown entirely blanked out — one underscore-run
-// per word — for everyone to race to type. Songs come from the same live
-// iTunes search pool as Name That Tune (`songSource.ts`); the lyric text
-// itself comes from lyrics.ovh, a free, keyless lyrics API.
-
-const ROUND_MS = 30_000;
+// "Finish the Lyric": a short clip plays, then cuts off, and the next line
+// of that song's actual lyrics is shown entirely blanked out — one
+// underscore-run per word — for everyone to race to type. Songs come from
+// the same live iTunes search pool as Name That Tune (`songSource.ts`); the
+// lyric text itself comes from lyrics.ovh, a free, keyless lyrics API.
+//
+// Neither free API exposes word-level timing, so there's no way to know
+// exactly when a given lyric line is sung within the preview clip. To keep
+// the clip-then-blank flow actually making sense despite that, this always
+// targets the *opening* line of the song (typically sung shortly after the
+// clip starts, once any instrumental intro ends) and trims playback to a
+// short `CLIP_SECONDS` window — see `FinishLyricView.tsx`, which cuts the
+// audio off client-side and only reveals the blanks once the clip stops.
+export const CLIP_SECONDS = 7;
+const ROUND_MS = 32_000; // covers the clip plus a real guessing window after it
 const DEFAULT_ROUNDS = 8;
 
 // Tracks song titles already used, across games, for the lifetime of this
@@ -28,10 +36,11 @@ const SECTION_MARKER_RE = /^[[(].*[\])]$/;
 const SECTION_WORD_RE = /chorus|verse\s*\d*|bridge|outro|intro|refrain|pre-chorus/i;
 const CLEAN_LINE_RE = /^[a-zA-Z0-9'",.!?;: -]+$/;
 
-// Fetches the song's lyrics and picks one usable line — real prose, not a
-// section marker, a reasonable length to blank out and guess, and (when
-// possible) from the back half of the song so it isn't just the opening
-// line that the preview clip already gave away.
+// Fetches the song's lyrics and picks the opening usable line — real prose,
+// not a section marker, a reasonable length to blank out and guess. Taking
+// the *first* line (rather than a random one from anywhere in the song) is
+// what makes the short clip-then-blank cutoff make sense: it's the line
+// most likely to land right around where the clip stops.
 async function fetchLyricLine(song: SongResult): Promise<LyricLine | null> {
   const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(song.artist)}/${encodeURIComponent(song.title)}`;
   try {
@@ -43,14 +52,13 @@ async function fetchLyricLine(song: SongResult): Promise<LyricLine | null> {
       .split("\n")
       .map((l) => l.trim())
       .filter((l) => l.length > 0 && !SECTION_MARKER_RE.test(l) && !SECTION_WORD_RE.test(l) && CLEAN_LINE_RE.test(l));
-    if (lines.length < 6) return null;
+    if (lines.length < 4) return null;
 
-    const backHalf = lines.slice(Math.floor(lines.length * 0.4));
-    const pool = (backHalf.length ? backHalf : lines).filter((l) => {
+    const frontPool = lines.slice(0, 6).filter((l) => {
       const wc = l.split(/\s+/).filter(Boolean).length;
       return wc >= 3 && wc <= 8;
     });
-    const pick = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)]! : lines[Math.floor(lines.length / 2)]!;
+    const pick = frontPool[0] ?? lines.find((l) => l.split(/\s+/).filter(Boolean).length >= 2) ?? lines[0]!;
     const words = pick.split(/\s+/).filter(Boolean);
     if (words.length < 2) return null;
     return { raw: pick, words };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { FinishLyricAction, FinishLyricView as ViewType } from "@/lib/games/finishLyric";
+import { CLIP_SECONDS, FinishLyricAction, FinishLyricView as ViewType } from "@/lib/games/finishLyric";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
 
@@ -21,15 +21,35 @@ export default function FinishLyricView({
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const firedTimeUp = useRef(false);
   const isHost = meId === view.hostId;
+  // The clip is short and cuts itself off — the blank line only appears once
+  // it stops, so it reads as "here's the clip... now finish the line" rather
+  // than showing the blanks and the audio at the same time.
+  const [blanksRevealed, setBlanksRevealed] = useState(false);
 
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || view.phase !== "guessing") return;
+    setBlanksRevealed(false);
     audio.currentTime = 0;
-    audio.play().catch(() => {});
+    audio.play().catch(() => setBlanksRevealed(true)); // autoplay blocked — don't block the round on it
+    const cutoff = setTimeout(() => {
+      audio.pause();
+      setBlanksRevealed(true);
+    }, CLIP_SECONDS * 1000);
+    return () => clearTimeout(cutoff);
   }, [view.previewUrl, view.phase]);
+
+  // Belt-and-suspenders: also cap playback if the clip is replayed/scrubbed
+  // past the cutoff via the native controls.
+  function handleTimeUpdate() {
+    const audio = audioRef.current;
+    if (audio && audio.currentTime >= CLIP_SECONDS) {
+      audio.pause();
+      setBlanksRevealed(true);
+    }
+  }
 
   useEffect(() => {
     firedTimeUp.current = false;
@@ -80,22 +100,29 @@ export default function FinishLyricView({
         Round {view.roundIndex + 1} of {view.totalRounds}
       </p>
 
-      <audio ref={audioRef} src={view.previewUrl} controls className="w-full max-w-xs" />
+      <audio ref={audioRef} src={view.previewUrl} controls onTimeUpdate={handleTimeUpdate} className="w-full max-w-xs" />
 
-      {/* The blanked-out lyric line — the whole point of the game */}
+      {/* The blanked-out lyric line — the whole point of the game. Stays
+          hidden behind a "listen up" prompt until the clip cuts off. */}
       <div className="w-full max-w-lg rounded-2xl border border-gold/20 bg-gold/5 px-6 py-5 text-center">
         <p className="mb-2 text-[11px] uppercase tracking-widest text-slate-500">Finish the lyric</p>
         {revealed ? (
           <p className="text-xl font-bold text-gold [animation:feud-pop_0.4s_ease-out]">"{view.revealedAnswer}"</p>
+        ) : view.phase === "guessing" && !blanksRevealed ? (
+          <p className="animate-pulse text-lg font-semibold text-slate-400">🎧 Listen carefully…</p>
         ) : (
-          <p className="break-words font-mono text-lg font-bold tracking-wider text-slate-100 sm:text-2xl">{view.blankPattern}</p>
+          <p className="break-words font-mono text-lg font-bold tracking-wider text-slate-100 sm:text-2xl [animation:feud-pop_0.4s_ease-out]">{view.blankPattern}</p>
         )}
-        {remainingMs !== null && view.phase === "guessing" && (
+        {remainingMs !== null && view.phase === "guessing" && blanksRevealed && (
           <p className="mt-2 text-sm font-bold tracking-wide text-gold">⏱ {Math.ceil(remainingMs / 1000)}s</p>
         )}
       </div>
 
-      {view.phase === "guessing" && (
+      {view.phase === "guessing" && !blanksRevealed && (
+        <p className="text-center text-xs text-slate-500">The blank line appears the moment the clip stops…</p>
+      )}
+
+      {view.phase === "guessing" && blanksRevealed && (
         <div className="flex w-full max-w-md flex-col gap-3">
           <div className="max-h-40 overflow-y-auto rounded-xl bg-black/20 p-3 text-sm">
             {view.guesses.length === 0 && <p className="text-slate-500">Guesses will show up here…</p>}

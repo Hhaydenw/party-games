@@ -81,10 +81,15 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   rank surprisingly high for generic "hits" searches. Name That Tune has you
   guess the title/artist (guessing both in one guess earns bonus points);
   Finish the Lyric fetches the song's real lyrics from the free, keyless
-  [lyrics.ovh](https://lyrics.ovh) API, blanks out one full line, and has you
-  type the missing line — matching is lenient (small typos still count) but
-  the preview clip isn't time-synced to the featured line, so the blank line
-  may not be exactly where the 30-second clip stops.
+  [lyrics.ovh](https://lyrics.ovh) API and blanks out the *opening* line —
+  matching is lenient (small typos still count). Neither API exposes
+  word-level timing, so there's no way to know exactly when a line is sung
+  within the preview; targeting the opening line (usually sung shortly after
+  the clip starts) and cutting the clip itself down to ~7 seconds
+  client-side, with the blanks only appearing once the clip stops, is the
+  best approximation of "clip plays, then finish the line" that's possible
+  without paid/timestamped lyrics data. It can still occasionally miss if a
+  song's intro runs long.
 - **Tank Arena** is the one real-time game here — everyone else is turn-based.
   WASD to move, aim/shoot with the mouse, solo free-for-all or 2 teams. The server
   runs a physics tick ~20x/second independent of player actions (see
