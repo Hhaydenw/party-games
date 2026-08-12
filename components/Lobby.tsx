@@ -1,6 +1,6 @@
 "use client";
 
-import { COMING_SOON, listAvailableGames } from "@/lib/games/gameList";
+import { COMING_SOON, listAvailableGames } from "@/lib/games/registry";
 import { PlayerInfo, RoomSummary } from "@/lib/types";
 import { useParty } from "@/lib/socketClient";
 import InviteLink from "@/components/InviteLink";

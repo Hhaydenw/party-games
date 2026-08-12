@@ -6,7 +6,7 @@ invite link, everyone picks a display name, and you play together in real time.
 ## What's in it
 
 The platform (rooms, invite links, display names, lobby, reconnect) is built so
-new games drop in as self-contained plugins without touching anything else. Nine
+new games drop in as self-contained plugins without touching anything else. Eight
 games are fully implemented:
 
 | Game | Category | Players |
@@ -16,7 +16,6 @@ games are fully implemented:
 | **Family Feud** | 📱 Party | 4–12 |
 | **Doodle Guess** (Pictionary/skribbl-style) | 📱 Party | 3–10 |
 | **Name That Tune** | 📱 Party | 2–12 |
-| **Finish the Lyric** | 📱 Party | 2–12 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
 | **The Game of Life** | 🎲 Board | 2–6 |
 | **Monopoly** | 🎲 Board | 2–6 |
@@ -32,17 +31,16 @@ Nothing is on the "coming soon" shelf right now — see
 
 The host can tune each round-based game before starting it — a **Settings** panel
 appears in the lobby once a game is picked (rounds; Trivia Night also gets
-category/difficulty; Name That Tune and Finish the Lyric get genre/decade; Tank
-Arena gets solo-vs-teams and match length). Board games (Uno, Life, Monopoly)
-don't have a settings panel since they play to a win condition rather than N
-rounds.
+category/difficulty; Name That Tune gets genre/decade; Tank Arena gets
+solo-vs-teams and match length). Board games (Uno, Life, Monopoly) don't have a
+settings panel since they play to a win condition rather than N rounds.
 
 **Freshness**: every trivia/question/song-based game is designed not to repeat
 itself. Trivia Night pulls live from a database of thousands of real questions.
 Family Feud has 100+ original questions and tracks which ones it's already asked,
-across games, for as long as the server keeps running. Name That Tune and Finish
-the Lyric do the same for songs — and neither of them stores a song list at all
-(see below). None of these reset until their pool is exhausted, and even then
+across games, for as long as the server keeps running. Name That Tune does the
+same for songs — and doesn't store a song list at all (see below). None of these
+reset until their pool is exhausted, and even then
 they only start reusing — they never *guarantee* a repeat within a normal night.
 
 **Known simplifications**, called out here rather than hidden:
@@ -68,9 +66,9 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
 - **Trivia Night** is powered live by the free, keyless
   [Open Trivia Database](https://opentdb.com) — real questions across categories
   and difficulties, no account or API key needed.
-- **Name That Tune** and **Finish the Lyric** both pull their song pool from
-  Apple's free, keyless [iTunes Search API](https://performance-partners.apple.com/search-api)
-  — no account or API key, no stored song list at all. When a genre/decade is
+- **Name That Tune** pulls its song pool from Apple's free, keyless
+  [iTunes Search API](https://performance-partners.apple.com/search-api) — no
+  account or API key, no stored song list at all. When a genre/decade is
   picked, the server searches iTunes directly with a query like "1980s rock
   hits"; the *search itself* is the source of "biggest songs of that decade and
   genre", and the same call returns each hit's real 30-second preview clip, so
@@ -78,32 +76,8 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   This is best-effort, not an exact chart — iTunes has no true decade filter,
   so relevance comes from the query wording rather than certified chart data;
   a filter also screens out lullaby/karaoke/tribute-album covers that otherwise
-  rank surprisingly high for generic "hits" searches. Name That Tune has you
-  guess the title/artist (guessing both in one guess earns bonus points);
-  Finish the Lyric fetches the song's real lyrics from the free, keyless
-  [lyrics.ovh](https://lyrics.ovh) API, blanks out a line, and has you type
-  it — matching is lenient (small typos still count). Neither music API
-  exposes word-level timing, so the server runs its own real, self-hosted
-  transcription: an open-source Whisper model (`Xenova/whisper-tiny.en`,
-  via [transformers.js](https://github.com/huggingface/transformers.js))
-  transcribes the clip in-process — no paid API, no API key, no per-request
-  cost — and `lib/games/finishLyric.ts` fuzzy-aligns that transcript against
-  the song's *real* fetched lyrics to find the actual audio timestamp where
-  a given line starts (`lib/transcribe.ts` handles decoding the clip via a
-  bundled `ffmpeg-static` binary and running the model). When that alignment
-  succeeds, the cutoff is a verified, real moment in that song's own
-  audio — not a guess. The model loads once per server process (a few
-  seconds) and stays warm after that, so each round's transcription typically
-  takes about a second. If transcription or alignment doesn't succeed for a
-  particular song (a model hiccup, non-English lyrics, a line that isn't
-  actually within the clip), it falls back to the client doing its own
-  audio-onset detection (`lib/audioOnset.ts` — real signal processing against
-  the clip's energy envelope, still no paid service) and finally to a fixed
-  ~7 second cutoff as the last resort. Every round therefore lands on one of
-  three tiers, from most to least precise: server-verified transcription →
-  client-side onset detection → fixed fallback — so the game keeps working
-  end to end even when the most accurate path doesn't pan out for a
-  particular song.
+  rank surprisingly high for generic "hits" searches. Guess the title/artist —
+  guessing both in one guess earns bonus points.
 - **Tank Arena** is the one real-time game here — everyone else is turn-based.
   WASD to move, aim/shoot with the mouse, solo free-for-all or 2 teams. The server
   runs a physics tick ~20x/second independent of player actions (see
@@ -162,14 +136,6 @@ clears all active rooms. That's fine for casual game nights; if you want rooms t
 survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-memory
 `Map` for Redis.
 
-**Finish the Lyric's transcription** downloads its Whisper model (~40MB) the first
-time the game is played after a server (re)start, and keeps it warm in memory for
-that process's lifetime — so the very first round after a deploy is a bit slower
-(a few seconds) than every round after it. `ffmpeg-static` downloads a
-platform-specific binary during `npm install`, so no extra setup is needed on
-Render/Railway/a VPS; it just adds a bit to install time and deploy image size.
-No GPU, API key, or paid service required either way.
-
 ## How it's built
 
 - **Next.js 16 (App Router) + React 18 + TypeScript**, styled with Tailwind.
@@ -201,16 +167,6 @@ No GPU, API key, or paid service required either way.
   "Genre") and the lobby renders controls for them automatically
   (`components/GameOptionsPanel.tsx`); the room manager validates/defaults them
   and passes the resolved values into `createInitialState`.
-- **Server-only game logic**: `lib/games/registry.ts` (the full `GAMES` map,
-  used by `lib/rooms.ts`) must only ever be imported from server-side code.
-  Finish the Lyric's engine needs Node built-ins for real audio transcription
-  (`lib/transcribe.ts` — `child_process`, `ffmpeg-static`, a local Whisper
-  model), which can't be bundled into the browser; `lib/games/gameList.ts`
-  exists specifically so the client (the lobby's game picker) only ever needs
-  each game's lightweight `meta`, never the full engine. If a future game
-  needs a Node-only dependency, give it a `yourgame.meta.ts` split the same
-  way (see `finishLyric.meta.ts`) rather than importing its full module from
-  a client component.
 
 Sessions (so refreshing the page or a dropped wifi connection doesn't kick you out
 of a room) are stored in the browser via `localStorage`, keyed per room code, and
