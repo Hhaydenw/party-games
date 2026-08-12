@@ -80,11 +80,13 @@ export default function FamilyFeudView({
   players: PlayerInfo[];
 }) {
   const [draft, setDraft] = useState("");
+  const [chatDraft, setChatDraft] = useState("");
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
   const isHost = meId === view.hostId;
   const otherTeamMeta = view.teams.find((t) => t.id !== view.yourTeam)!;
   const myCaptainId = view.yourTeam === "A" ? view.captainA : view.captainB;
   const isMyTeamsCaptain = meId === myCaptainId;
+  const myTeamMeta = view.teams.find((t) => t.id === view.yourTeam)!;
 
   useEffect(() => setDraft(""), [view.phase, view.faceoffBuzzedTeam]);
 
@@ -96,6 +98,37 @@ export default function FamilyFeudView({
     if (type === "steal") onAction({ type: "steal", text: draft.trim() });
     setDraft("");
   }
+
+  function submitChat(e: React.FormEvent) {
+    e.preventDefault();
+    if (!chatDraft.trim()) return;
+    onAction({ type: "teamChat", text: chatDraft.trim() });
+    setChatDraft("");
+  }
+
+  // Face-off answers get a fast 7s clock; controlling/stealing guesses get
+  // 25s — both driven by the same server-set `guessDeadline`, with the host
+  // firing timeUp once it lapses (same pattern as Trivia/Name That Tune).
+  const [remainingMs, setRemainingMs] = useState<number | null>(null);
+  const firedTimeUp = useRef(false);
+  useEffect(() => {
+    firedTimeUp.current = false;
+    if (!view.guessDeadline) {
+      setRemainingMs(null);
+      return;
+    }
+    const tick = () => {
+      const remaining = Math.max(0, view.guessDeadline! - Date.now());
+      setRemainingMs(remaining);
+      if (remaining === 0 && isHost && !firedTimeUp.current) {
+        firedTimeUp.current = true;
+        onAction({ type: "timeUp" });
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 300);
+    return () => clearInterval(interval);
+  }, [view.guessDeadline, isHost, onAction]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -140,6 +173,14 @@ export default function FamilyFeudView({
           <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Pot</span>
           <span className="rounded-lg bg-gold/15 px-4 py-1.5 font-mono text-2xl font-black text-gold">{view.pot}</span>
         </div>
+        {remainingMs !== null && (
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Time</span>
+            <span className={`rounded-lg px-4 py-1.5 font-mono text-2xl font-black ${remainingMs <= 3000 ? "animate-pulse text-accent" : "text-slate-200"}`}>
+              {Math.ceil(remainingMs / 1000)}
+            </span>
+          </div>
+        )}
       </div>
 
       {view.phase === "faceoff" && (
@@ -230,10 +271,38 @@ export default function FamilyFeudView({
         </div>
       )}
 
-      <div className="rounded-xl bg-black/20 p-3 text-xs text-slate-400">
-        {view.roundLog.map((line, i) => (
-          <p key={i}>{line}</p>
-        ))}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-xl bg-black/20 p-3 text-xs text-slate-400">
+          {view.roundLog.map((line, i) => (
+            <p key={i}>{line}</p>
+          ))}
+        </div>
+
+        {/* Private team chat — only your own teammates ever see these messages. */}
+        <div className={`flex flex-col gap-2 rounded-xl p-3 ring-1 ${TEAM_STYLE[view.yourTeam]!.bg} ${TEAM_STYLE[view.yourTeam]!.ring}`}>
+          <p className={`text-[10px] font-bold uppercase tracking-widest ${TEAM_STYLE[view.yourTeam]!.text}`}>
+            🤫 {myTeamMeta.name} chat (teammates only)
+          </p>
+          <div className="max-h-28 flex-1 overflow-y-auto text-xs">
+            {view.teamChat.length === 0 && <p className="text-slate-500">Strategize with your team here…</p>}
+            {view.teamChat.map((m) => (
+              <p key={m.id} className="text-slate-300">
+                <span className="font-semibold text-slate-400">{nameFor(m.playerId)}: </span>
+                {m.text}
+              </p>
+            ))}
+          </div>
+          <form onSubmit={submitChat} className="flex gap-1.5">
+            <input
+              className="input py-1.5 text-xs"
+              placeholder="Message your team…"
+              maxLength={200}
+              value={chatDraft}
+              onChange={(e) => setChatDraft(e.target.value)}
+            />
+            <button className="btn-secondary shrink-0 px-3 py-1.5 text-xs">Send</button>
+          </form>
+        </div>
       </div>
     </div>
   );

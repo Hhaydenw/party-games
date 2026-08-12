@@ -6,6 +6,76 @@ import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
 
 const SHIP_COLORS = ["#22c55e", "#3b82f6", "#f2b705", "#ec4899"];
+const INVADER_COLORS = ["#f2b705", "#ec4899", "#a855f7", "#3b82f6", "#22c55e"];
+
+// Classic pixel-invader silhouettes (two alternating frames for a bit of
+// life), drawn as a small filled grid instead of a plain circle.
+const INVADER_FRAME_A = ["00100000100", "00010001000", "00111111100", "01101110110", "11111111111", "10111111101", "10100000101", "00011011000"];
+const INVADER_FRAME_B = ["00100000100", "10010001001", "10111111101", "10101110101", "11111111111", "01111111110", "01000000010", "10100000101"];
+
+function drawInvader(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, wiggle: boolean) {
+  const grid = wiggle ? INVADER_FRAME_B : INVADER_FRAME_A;
+  const rows = grid.length;
+  const cols = grid[0]!.length;
+  const cell = (r * 2.2) / cols;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = color;
+  for (let ry = 0; ry < rows; ry++) {
+    const line = grid[ry]!;
+    for (let cx = 0; cx < cols; cx++) {
+      if (line[cx] === "1") ctx.fillRect((cx - cols / 2) * cell, (ry - rows / 2) * cell, cell + 0.5, cell + 0.5);
+    }
+  }
+  ctx.restore();
+}
+
+// A small rocket-ish ship (nose, swept wings, cockpit, engine flame)
+// instead of a plain triangle.
+function drawPlayerShip(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, thrust: boolean) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 1.2);
+  ctx.lineTo(r * 0.35, -r * 0.2);
+  ctx.lineTo(r * 0.22, r * 0.6);
+  ctx.lineTo(-r * 0.22, r * 0.6);
+  ctx.lineTo(-r * 0.35, -r * 0.2);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(r * 0.3, r * 0.1);
+  ctx.lineTo(r * 1.1, r * 0.75);
+  ctx.lineTo(r * 0.3, r * 0.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.3, r * 0.1);
+  ctx.lineTo(-r * 1.1, r * 0.75);
+  ctx.lineTo(-r * 0.3, r * 0.6);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.beginPath();
+  ctx.ellipse(0, -r * 0.15, r * 0.16, r * 0.24, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (thrust) {
+    ctx.fillStyle = "rgba(242,183,5,0.9)";
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.15, r * 0.6);
+    ctx.lineTo(0, r * (1.0 + Math.random() * 0.3));
+    ctx.lineTo(r * 0.15, r * 0.6);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
 
 export default function VoidRaidersView({
   view,
@@ -106,13 +176,10 @@ export default function VoidRaidersView({
     ctx.fillStyle = "#05060f";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    const wiggle = Math.floor(Date.now() / 400) % 2 === 0;
     for (const e of view.enemies) {
-      ctx.fillStyle = "#ef4444";
-      ctx.beginPath();
-      ctx.arc(e.x * sx, e.y * sy, view.enemyRadius * sx, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#7f1d1d";
-      ctx.fillRect(e.x * sx - 3, e.y * sy + view.enemyRadius * sy - 2, 6, 4);
+      const color = INVADER_COLORS[e.row % INVADER_COLORS.length]!;
+      drawInvader(ctx, e.x * sx, e.y * sy, view.enemyRadius * sx, color, wiggle);
     }
 
     for (const b of view.bullets) {
@@ -129,17 +196,11 @@ export default function VoidRaidersView({
       const x = s.x * sx;
       const y = s.y * sy;
       const r = view.shipRadius * sx;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(x, y - r);
-      ctx.lineTo(x - r, y + r);
-      ctx.lineTo(x + r, y + r);
-      ctx.closePath();
-      ctx.fill();
+      drawPlayerShip(ctx, x, y, r, color, true);
       ctx.fillStyle = "#fff";
       ctx.font = "10px sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(nameFor(s.id), x, y + r + 14);
+      ctx.fillText(nameFor(s.id), x, y + r + 20);
     }
   }, [view, meId]);
 

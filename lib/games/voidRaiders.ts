@@ -86,7 +86,7 @@ export interface VoidRaidersView {
   phase: "playing" | "finished";
   matchEndsAt: number;
   ships: { id: PlayerId; x: number; y: number; lives: number; alive: boolean; score: number; invulnerable: boolean }[];
-  enemies: { id: string; x: number; y: number }[];
+  enemies: { id: string; x: number; y: number; row: number }[];
   bullets: { id: string; x: number; y: number; from: "player" | "enemy" }[];
   log: string[];
 }
@@ -315,7 +315,7 @@ export const voidRaiders: GameDefinition<VoidRaidersState, VoidRaidersView, Void
         const s = state.ships[id]!;
         return { id: s.id, x: s.x, y: SHIP_Y, lives: s.lives, alive: s.alive, score: s.score, invulnerable: now < s.invulnUntil };
       }),
-      enemies: state.enemies.filter((e) => e.alive).map((e) => ({ id: e.id, x: e.x, y: e.y })),
+      enemies: state.enemies.filter((e) => e.alive).map((e) => ({ id: e.id, x: e.x, y: e.y, row: e.row })),
       bullets: state.bullets.map((b) => ({ id: b.id, x: b.x, y: b.y, from: b.from })),
       log: state.log.slice(-8),
     };

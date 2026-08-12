@@ -14,7 +14,7 @@ import { DECADE_CHOICES, GENRE_CHOICES, SongResult, searchSongs } from "./songSo
 // a fixed guess that could cut a longer clip off early. This cap only
 // matters if playback never starts/finishes for some reason (autoplay
 // blocked, network hiccup).
-const ROUND_MS = 60_000;
+const ROUND_MS = 30_000;
 const DEFAULT_ROUNDS = 8;
 
 // Tracks song titles already played, across games, for the lifetime of this

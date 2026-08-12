@@ -987,6 +987,8 @@ const DEFAULT_ROUNDS = 6;
 // process stays up, so replaying the game doesn't repeat the same prompts.
 const usedPrompts = new Set<string>();
 
+let chatSeq = 0;
+
 export type FeudPhase = "faceoff" | "controlling" | "stealing" | "roundEnd" | "finished";
 
 interface FeudAnswer {
@@ -1024,6 +1026,18 @@ export interface FeudState {
   pot: number;
   roundLog: string[];
   lastRoundResult: { winningTeam: TeamId | null; pot: number; reason: string } | null;
+  // Whoever currently has to answer/guess is racing this deadline — 7s for a
+  // face-off buzz-in answer, 25s for a controlling/stealing guess. `null`
+  // when nobody's currently on the clock (e.g. waiting for a buzz).
+  guessDeadline: number | null;
+  teamChats: Record<TeamId, TeamChatMessage[]>;
+}
+
+interface TeamChatMessage {
+  id: string;
+  playerId: PlayerId;
+  text: string;
+  at: number;
 }
 
 export interface FeudView {
@@ -1047,9 +1061,21 @@ export interface FeudView {
   pot: number;
   roundLog: string[];
   lastRoundResult: FeudState["lastRoundResult"];
+  guessDeadline: number | null;
+  teamChat: TeamChatMessage[]; // your team's chat only — the other team's is never sent to you
 }
 
-export type FeudAction = { type: "buzz" } | { type: "faceoffAnswer"; text: string } | { type: "guess"; text: string } | { type: "steal"; text: string } | { type: "advance" };
+export type FeudAction =
+  | { type: "buzz" }
+  | { type: "faceoffAnswer"; text: string }
+  | { type: "guess"; text: string }
+  | { type: "steal"; text: string }
+  | { type: "advance" }
+  | { type: "timeUp" }
+  | { type: "teamChat"; text: string };
+
+const FACEOFF_ANSWER_MS = 7_000;
+const GUESS_MS = 25_000;
 
 function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice();
@@ -1065,7 +1091,35 @@ function normalize(s: string): string {
     .toLowerCase()
     .trim()
     .replace(/^(a|an|the)\s+/, "")
-    .replace(/[^a-z0-9 ]/g, "");
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = a[i - 1] === b[j - 1] ? prev[j - 1]! : 1 + Math.min(prev[j - 1]!, prev[j]!, row[j - 1]!);
+    }
+    prev = row;
+  }
+  return prev[b.length]!;
+}
+
+// Accepts near-misses (typos, near-homophones like "hangover" vs "hungover")
+// instead of requiring an exact or substring match — the threshold scales
+// with word length so short words still need to be close to exact.
+function fuzzyEquals(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen < 4) return false;
+  const threshold = maxLen <= 6 ? 1 : maxLen <= 10 ? 2 : 3;
+  return levenshtein(a, b) <= threshold;
 }
 
 function buildAnswers(def: FeudQuestionDef): FeudAnswer[] {
@@ -1082,6 +1136,7 @@ function findMatch(text: string, answers: FeudAnswer[]): number | null {
       const v = normalize(variant);
       if (guess === v) return i;
       if (guess.length >= 4 && v.length >= 4 && (guess.includes(v) || v.includes(guess))) return i;
+      if (fuzzyEquals(guess, v)) return i;
     }
   }
   return null;
@@ -1109,6 +1164,7 @@ function startRound(state: FeudState, roundIndex: number): FeudState {
     pot: 0,
     roundLog: [`Round ${roundIndex + 1}: ${def.prompt}`],
     lastRoundResult: null,
+    guessDeadline: null, // nobody's on the clock until a captain buzzes in
   };
 }
 
@@ -1127,6 +1183,7 @@ function endRound(state: FeudState, winningTeam: TeamId | null, reason: string):
     phase: "roundEnd",
     lastRoundResult: { winningTeam, pot: state.pot, reason },
     roundLog: [...state.roundLog, reason],
+    guessDeadline: null,
   };
 }
 
@@ -1172,11 +1229,25 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
       pot: 0,
       roundLog: [],
       lastRoundResult: null,
+      guessDeadline: null,
+      teamChats: { A: [], B: [] },
     };
     return startRound(base, 0);
   },
   applyAction(state, playerId, action) {
     if (state.phase === "finished") throw new GameActionError("Game is already over.");
+
+    if (action.type === "teamChat") {
+      const team: TeamId | null = state.teams.A.memberIds.includes(playerId) ? "A" : state.teams.B.memberIds.includes(playerId) ? "B" : null;
+      if (!team) throw new GameActionError("You're not on a team in this game.");
+      const text = action.text.trim().slice(0, 200);
+      if (!text) throw new GameActionError("Message can't be empty.");
+      chatSeq += 1;
+      const message: TeamChatMessage = { id: `tc${chatSeq}`, playerId, text, at: Date.now() };
+      const teamChats = { ...state.teamChats, [team]: [...state.teamChats[team], message].slice(-50) };
+      return { ...state, teamChats };
+    }
+
     const yourTeam: TeamId | null = state.teams.A.memberIds.includes(playerId) ? "A" : state.teams.B.memberIds.includes(playerId) ? "B" : null;
     if (!yourTeam) throw new GameActionError("You're not on a team in this game.");
 
@@ -1190,21 +1261,29 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
         ...state,
         faceoffBuzzedTeam: yourTeam,
         faceoffFirstTeam: state.faceoffFirstTeam ?? yourTeam,
+        guessDeadline: Date.now() + FACEOFF_ANSWER_MS,
         roundLog: [...state.roundLog, `${state.teams[yourTeam].name} buzzed in first!`],
       };
     }
 
-    if (action.type === "faceoffAnswer") {
+    if (action.type === "faceoffAnswer" || (action.type === "timeUp" && state.phase === "faceoff" && state.faceoffBuzzedTeam)) {
       if (state.phase !== "faceoff") throw new GameActionError("No face-off happening right now.");
-      if (state.faceoffBuzzedTeam !== yourTeam) throw new GameActionError("Buzz in first.");
-      const captain = captainOf(state.teams[yourTeam], state.roundIndex);
-      if (playerId !== captain) throw new GameActionError("Only your team's face-off player can answer.");
-      const text = action.text.trim().slice(0, 60);
-      if (!text) throw new GameActionError("Answer can't be empty.");
+      const actingTeam = state.faceoffBuzzedTeam;
+      if (!actingTeam) throw new GameActionError("Buzz in first.");
+      const isTimeUp = action.type === "timeUp";
+      if (!isTimeUp) {
+        if (actingTeam !== yourTeam) throw new GameActionError("Buzz in first.");
+        const captain = captainOf(state.teams[yourTeam], state.roundIndex);
+        if (playerId !== captain) throw new GameActionError("Only your team's face-off player can answer.");
+      }
+      const text = isTimeUp ? "" : (action as { text: string }).text.trim().slice(0, 60);
+      if (!isTimeUp && !text) throw new GameActionError("Answer can't be empty.");
 
-      const attempted = [...state.faceoffAttempted, yourTeam];
+      const attempted = [...state.faceoffAttempted, actingTeam];
       const idx = findMatch(text, state.answers);
-      const log = [...state.roundLog, `${state.teams[yourTeam].name} answered "${text}".`];
+      const log = isTimeUp
+        ? [...state.roundLog, `${state.teams[actingTeam].name} ran out of time!`]
+        : [...state.roundLog, `${state.teams[actingTeam].name} answered "${text}".`];
 
       if (idx !== null) {
         const answers = state.answers.slice();
@@ -1214,26 +1293,28 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
           answers,
           faceoffAttempted: attempted,
           phase: "controlling",
-          controllingTeam: yourTeam,
+          controllingTeam: actingTeam,
           controllingIndex: 0,
           pot: answers[idx]!.points,
-          roundLog: [...log, `On the board! ${state.teams[yourTeam].name} takes control.`],
+          guessDeadline: Date.now() + GUESS_MS,
+          roundLog: [...log, `On the board! ${state.teams[actingTeam].name} takes control.`],
         };
       }
 
-      const otherTeam: TeamId = yourTeam === "A" ? "B" : "A";
+      const otherTeam: TeamId = actingTeam === "A" ? "B" : "A";
       if (!attempted.includes(otherTeam)) {
         // Not on the board — pass the floor to the other captain.
         return {
           ...state,
           faceoffBuzzedTeam: otherTeam,
           faceoffAttempted: attempted,
+          guessDeadline: Date.now() + FACEOFF_ANSWER_MS,
           roundLog: [...log, `Not on the board. ${state.teams[otherTeam].name}'s turn to answer.`],
         };
       }
 
       // Both teams missed — whoever buzzed in first gets control with an empty pot.
-      const winner = state.faceoffFirstTeam ?? yourTeam;
+      const winner = state.faceoffFirstTeam ?? actingTeam;
       return {
         ...state,
         faceoffAttempted: attempted,
@@ -1241,58 +1322,77 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
         controllingTeam: winner,
         controllingIndex: 0,
         pot: 0,
+        guessDeadline: Date.now() + GUESS_MS,
         roundLog: [...log, `Both teams missed. ${state.teams[winner].name} takes control.`],
       };
     }
 
-    if (action.type === "guess") {
+    if (action.type === "guess" || (action.type === "timeUp" && state.phase === "controlling")) {
       if (state.phase !== "controlling") throw new GameActionError("Your team isn't in control right now.");
-      if (yourTeam !== state.controllingTeam) throw new GameActionError("It's the other team's turn to guess.");
-      const team = state.teams[yourTeam];
+      const team = state.teams[state.controllingTeam!];
       const expectedGuesser = team.memberIds[state.controllingIndex % team.memberIds.length]!;
-      if (playerId !== expectedGuesser) throw new GameActionError("It's a teammate's turn to guess.");
-      const text = action.text.trim().slice(0, 60);
-      if (!text) throw new GameActionError("Guess can't be empty.");
+      const isTimeUp = action.type === "timeUp";
+      if (!isTimeUp) {
+        if (yourTeam !== state.controllingTeam) throw new GameActionError("It's the other team's turn to guess.");
+        if (playerId !== expectedGuesser) throw new GameActionError("It's a teammate's turn to guess.");
+      }
+      const text = isTimeUp ? "" : (action as { text: string }).text.trim().slice(0, 60);
+      if (!isTimeUp && !text) throw new GameActionError("Guess can't be empty.");
       const idx = findMatch(text, state.answers);
       const controllingIndex = state.controllingIndex + 1;
+      const actingTeam = state.controllingTeam!;
 
       if (idx === null) {
         const strikes = state.strikes + 1;
-        const log = [...state.roundLog, `${state.teams[yourTeam].name} guessed "${text}" — strike ${strikes}!`];
+        const log = isTimeUp
+          ? [...state.roundLog, `${state.teams[actingTeam].name} ran out of time — strike ${strikes}!`]
+          : [...state.roundLog, `${state.teams[actingTeam].name} guessed "${text}" — strike ${strikes}!`];
         if (strikes >= 3) {
-          const other: TeamId = yourTeam === "A" ? "B" : "A";
-          return { ...state, strikes, controllingIndex, phase: "stealing", stealingTeam: other, roundLog: log };
+          const other: TeamId = actingTeam === "A" ? "B" : "A";
+          return { ...state, strikes, controllingIndex, phase: "stealing", stealingTeam: other, guessDeadline: Date.now() + GUESS_MS, roundLog: log };
         }
-        return { ...state, strikes, controllingIndex, roundLog: log };
+        return { ...state, strikes, controllingIndex, guessDeadline: Date.now() + GUESS_MS, roundLog: log };
       }
 
       const answers = state.answers.slice();
       answers[idx] = { ...answers[idx]!, revealed: true };
       const pot = state.pot + answers[idx]!.points;
-      const log = [...state.roundLog, `${state.teams[yourTeam].name} revealed "${answers[idx]!.text}" (${answers[idx]!.points} pts).`];
+      const log = [...state.roundLog, `${state.teams[actingTeam].name} revealed "${answers[idx]!.text}" (${answers[idx]!.points} pts).`];
       const boardCleared = answers.every((a) => a.revealed);
-      const next = { ...state, answers, pot, controllingIndex, roundLog: log };
-      if (boardCleared) return endRound(next, yourTeam, `${state.teams[yourTeam].name} cleared the board and banks ${pot} points!`);
+      const next = { ...state, answers, pot, controllingIndex, guessDeadline: Date.now() + GUESS_MS, roundLog: log };
+      if (boardCleared) return endRound(next, actingTeam, `${state.teams[actingTeam].name} cleared the board and banks ${pot} points!`);
       return next;
     }
 
-    if (action.type === "steal") {
+    if (action.type === "steal" || (action.type === "timeUp" && state.phase === "stealing")) {
       if (state.phase !== "stealing") throw new GameActionError("Not a steal opportunity right now.");
-      if (yourTeam !== state.stealingTeam) throw new GameActionError("Only the stealing team can guess.");
-      const text = action.text.trim().slice(0, 60);
-      if (!text) throw new GameActionError("Guess can't be empty.");
+      const actingTeam = state.stealingTeam!;
+      const isTimeUp = action.type === "timeUp";
+      if (!isTimeUp && yourTeam !== state.stealingTeam) throw new GameActionError("Only the stealing team can guess.");
+      const text = isTimeUp ? "" : (action as { text: string }).text.trim().slice(0, 60);
+      if (!isTimeUp && !text) throw new GameActionError("Guess can't be empty.");
       const idx = findMatch(text, state.answers);
       if (idx !== null) {
         const answers = state.answers.slice();
         answers[idx] = { ...answers[idx]!, revealed: true };
         return endRound(
           { ...state, answers },
-          yourTeam,
-          `${state.teams[yourTeam].name} steals with "${answers[idx]!.text}" and takes ${state.pot} points!`
+          actingTeam,
+          `${state.teams[actingTeam].name} steals with "${answers[idx]!.text}" and takes ${state.pot} points!`
         );
       }
       const controllingTeam = state.controllingTeam!;
-      return endRound(state, controllingTeam, `${state.teams[yourTeam].name}'s steal attempt failed. ${state.teams[controllingTeam].name} keeps ${state.pot} points.`);
+      const reason = isTimeUp
+        ? `${state.teams[actingTeam].name} ran out of time. ${state.teams[controllingTeam].name} keeps ${state.pot} points.`
+        : `${state.teams[actingTeam].name}'s steal attempt failed. ${state.teams[controllingTeam].name} keeps ${state.pot} points.`;
+      return endRound(state, controllingTeam, reason);
+    }
+
+    if (action.type === "timeUp") {
+      // No active timer to expire (e.g. still waiting for a buzz) — a no-op
+      // rather than an error, since the client's timer effect can't always
+      // perfectly know when a deadline it fired for is already stale.
+      return state;
     }
 
     if (action.type === "advance") {
@@ -1341,6 +1441,8 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
       pot: state.pot,
       roundLog: state.roundLog.slice(-6),
       lastRoundResult: state.lastRoundResult,
+      guessDeadline: state.guessDeadline,
+      teamChat: state.teamChats[yourTeam],
     };
   },
   isGameOver(state) {

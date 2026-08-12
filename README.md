@@ -72,9 +72,20 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
 - **Family Feud**'s face-off is a real buzz-in: first captain to buzz gets the
   first guess, and if they miss it passes to the other captain. Guessing while in
   control rotates through your team in order rather than letting everyone answer
-  at once, and the full survey reveals at the end of every round. The question
-  bank is original (written in the show's style, not scraped from broadcasts) —
-  see [Family Feud content note](#family-feud-content-note) below.
+  at once, and the full survey reveals at the end of every round. Everyone's on
+  a real clock — 7 seconds to answer once you've buzzed in for the face-off, 25
+  seconds per guess while controlling the board or attempting a steal; running
+  out of time counts as a miss/strike, same as a wrong answer. Answer matching
+  is fuzzy (Levenshtein distance, scaled to word length) so near-misses like
+  "hangover" for "hungover" still count, not just exact or substring matches.
+  Each team also gets a **private team chat** (see the chat panel next to the
+  round log) that only teammates can read — handy for strategizing a steal
+  without the other team seeing. The question bank is original (written in the
+  show's style, not scraped from broadcasts) — see
+  [Family Feud content note](#family-feud-content-note) below; it hasn't been
+  independently fact-checked against real survey data, since no free/accessible
+  source of certified Family Feud answers exists, but the fuzzy matching above
+  should meaningfully cut down on valid answers being wrongly rejected.
 - **Trivia Night** is powered live by the free, keyless
   [Open Trivia Database](https://opentdb.com) — real questions across categories
   and difficulties, no account or API key needed. Once a round ends, everyone
@@ -124,7 +135,9 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   score wins — ball speed ramps up with each rally and the bounce angle
   depends on where it hits your paddle. Void Raiders: a Galaga/Space
   Invaders-style shooter, A/D or ←/→ to move, space or click/hold to fire at
-  a descending enemy formation that gets tougher each wave — solo or
+  a descending enemy formation that gets tougher each wave — real vector-drawn
+  ships and pixel-invader enemies (canvas paths, not plain circles/triangles),
+  color-coded and lightly animated per row — solo or
   co-op/competitive up to 4 players sharing one arena, highest score when
   time's up (or everyone's ships are destroyed) wins.
 - **Wildest Answer** is an original Quiplash-style prompt-and-vote game (the

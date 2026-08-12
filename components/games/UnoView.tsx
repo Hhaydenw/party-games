@@ -210,9 +210,7 @@ export default function UnoView({
                 key={card.id}
                 disabled={!view.yourTurn || !playableNow}
                 onClick={() => handlePlay(card)}
-                className={`relative transition-transform duration-150 first:ml-0 enabled:hover:z-10 enabled:hover:-translate-y-3 disabled:opacity-60 ${
-                  view.yourTurn && !playableNow ? "grayscale" : ""
-                }`}
+                className="relative transition-transform duration-150 first:ml-0 enabled:hover:z-10 enabled:hover:-translate-y-3 disabled:opacity-60"
                 style={{ marginLeft: i === 0 ? 0 : -28, transform: `rotate(${tilt}deg)`, transformOrigin: "bottom center" }}
               >
                 <CardFace card={card} />
