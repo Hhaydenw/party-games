@@ -19,6 +19,13 @@ export interface RoomSummary {
   gameId: string | null;
   hostId: PlayerId | null;
   gameOptions: GameOptions;
+  // Series Mode: the host queues up several games in advance; points from
+  // each one's final ranking accumulate into `seriesPoints` as the room
+  // works through `seriesQueue`. Empty/false/zero when not running a series.
+  seriesQueue: string[];
+  seriesIndex: number; // index into seriesQueue of the game currently playing/just finished
+  seriesActive: boolean;
+  seriesPoints: Record<PlayerId, number>;
 }
 
 // A configurable setting a game exposes in the lobby before it starts (e.g.
@@ -77,6 +84,11 @@ export interface GameDefinition<S = unknown, V = unknown, A = unknown> {
   getPlayerView(state: S, playerId: PlayerId, players: PlayerInfo[]): V;
   isGameOver(state: S): boolean;
   getWinnerIds(state: S): PlayerId[];
+  // Optional: full best-to-worst finish order, used by Series Mode to award
+  // placement points across games with completely different scoring scales.
+  // Only meaningful once `isGameOver` is true. Games that don't implement
+  // this fall back to "winners tied for 1st, everyone else tied for last".
+  getRanking?(state: S): PlayerId[];
 }
 
 export class GameActionError extends Error {}
@@ -100,6 +112,9 @@ export interface ClientToServerEvents {
   "room:setGameOptions": (payload: { options: GameOptions }) => void;
   "room:startGame": () => void;
   "room:returnToLobby": () => void;
+  "room:setSeriesQueue": (payload: { gameIds: string[] }) => void;
+  "room:startSeries": () => void;
+  "room:nextSeriesGame": () => void;
   "game:action": (payload: { action: unknown }) => void;
   "chat:send": (payload: { text: string }) => void;
 }

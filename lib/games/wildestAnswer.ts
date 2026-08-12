@@ -375,4 +375,7 @@ export const wildestAnswer: GameDefinition<WildestAnswerState, WildestAnswerView
       .filter(([, v]) => v === max)
       .map(([k]) => k);
   },
+  getRanking(state) {
+    return [...state.playerIds].sort((a, b) => (state.scores[b] ?? 0) - (state.scores[a] ?? 0));
+  },
 };

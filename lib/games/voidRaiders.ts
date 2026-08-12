@@ -328,4 +328,7 @@ export const voidRaiders: GameDefinition<VoidRaidersState, VoidRaidersView, Void
     const max = Math.max(...state.order.map((id) => state.ships[id]!.score));
     return state.order.filter((id) => state.ships[id]!.score === max);
   },
+  getRanking(state) {
+    return [...state.order].sort((a, b) => state.ships[b]!.score - state.ships[a]!.score);
+  },
 };

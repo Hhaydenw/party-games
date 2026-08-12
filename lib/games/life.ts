@@ -407,4 +407,7 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
     const max = Math.max(...values.map(([, v]) => v));
     return values.filter(([, v]) => v === max).map(([pid]) => pid);
   },
+  getRanking(state) {
+    return [...state.order].sort((a, b) => netWorth(state.players[b]!) - netWorth(state.players[a]!));
+  },
 };

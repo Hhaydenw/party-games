@@ -323,4 +323,7 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
       .filter(([, v]) => v === max)
       .map(([k]) => k);
   },
+  getRanking(state) {
+    return [...state.playerIds].sort((a, b) => (state.scores[b] ?? 0) - (state.scores[a] ?? 0));
+  },
 };

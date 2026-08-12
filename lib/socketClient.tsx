@@ -51,6 +51,9 @@ interface Ctx {
   setGameOptions: (options: GameOptions) => void;
   startGame: () => void;
   returnToLobby: () => void;
+  setSeriesQueue: (gameIds: string[]) => void;
+  startSeries: () => void;
+  nextSeriesGame: () => void;
   sendAction: (action: unknown) => void;
   sendChat: (text: string) => void;
   currentPlayerId: string | null;
@@ -133,6 +136,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const setGameOptions = useCallback((options: GameOptions) => socketRef.current?.emit("room:setGameOptions", { options }), []);
   const startGame = useCallback(() => socketRef.current?.emit("room:startGame"), []);
   const returnToLobby = useCallback(() => socketRef.current?.emit("room:returnToLobby"), []);
+  const setSeriesQueue = useCallback((gameIds: string[]) => socketRef.current?.emit("room:setSeriesQueue", { gameIds }), []);
+  const startSeries = useCallback(() => socketRef.current?.emit("room:startSeries"), []);
+  const nextSeriesGame = useCallback(() => socketRef.current?.emit("room:nextSeriesGame"), []);
   const sendAction = useCallback((action: unknown) => socketRef.current?.emit("game:action", { action }), []);
   const sendChat = useCallback((text: string) => socketRef.current?.emit("chat:send", { text }), []);
   const clearError = useCallback(() => setError(null), []);
@@ -152,11 +158,34 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setGameOptions,
       startGame,
       returnToLobby,
+      setSeriesQueue,
+      startSeries,
+      nextSeriesGame,
       sendAction,
       sendChat,
       currentPlayerId,
     }),
-    [connected, room, gameView, error, chatMessages, clearError, createRoom, joinRoom, rejoinRoom, selectGame, setGameOptions, startGame, returnToLobby, sendAction, sendChat, currentPlayerId]
+    [
+      connected,
+      room,
+      gameView,
+      error,
+      chatMessages,
+      clearError,
+      createRoom,
+      joinRoom,
+      rejoinRoom,
+      selectGame,
+      setGameOptions,
+      startGame,
+      returnToLobby,
+      setSeriesQueue,
+      startSeries,
+      nextSeriesGame,
+      sendAction,
+      sendChat,
+      currentPlayerId,
+    ]
   );
 
   return <SocketCtx.Provider value={value}>{children}</SocketCtx.Provider>;

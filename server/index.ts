@@ -131,6 +131,39 @@ app.prepare().then(() => {
       }
     });
 
+    socket.on("room:setSeriesQueue", ({ gameIds }) => {
+      const meta = socketMeta.get(socket.id);
+      if (!meta) return;
+      try {
+        roomManager.setSeriesQueue(meta.code, meta.playerId, gameIds);
+        broadcastRoomState(io, meta.code);
+      } catch (err) {
+        socket.emit("error:message", err instanceof RoomError ? err.message : "Something went wrong.");
+      }
+    });
+
+    socket.on("room:startSeries", async () => {
+      const meta = socketMeta.get(socket.id);
+      if (!meta) return;
+      try {
+        await roomManager.startSeries(meta.code, meta.playerId);
+        broadcastRoomState(io, meta.code);
+      } catch (err) {
+        socket.emit("error:message", err instanceof RoomError ? err.message : "Something went wrong.");
+      }
+    });
+
+    socket.on("room:nextSeriesGame", async () => {
+      const meta = socketMeta.get(socket.id);
+      if (!meta) return;
+      try {
+        await roomManager.nextSeriesGame(meta.code, meta.playerId);
+        broadcastRoomState(io, meta.code);
+      } catch (err) {
+        socket.emit("error:message", err instanceof RoomError ? err.message : "Something went wrong.");
+      }
+    });
+
     socket.on("room:returnToLobby", () => {
       const meta = socketMeta.get(socket.id);
       if (!meta) return;

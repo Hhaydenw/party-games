@@ -317,4 +317,9 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
   getWinnerIds(state) {
     return state.winnerId ? [state.winnerId] : [];
   },
+  getRanking(state) {
+    // Winner first; everyone else ranked by cards remaining (fewer = better).
+    const rest = state.order.filter((id) => id !== state.winnerId).sort((a, b) => (state.hands[a]?.length ?? 99) - (state.hands[b]?.length ?? 99));
+    return state.winnerId ? [state.winnerId, ...rest] : rest;
+  },
 };

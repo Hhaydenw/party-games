@@ -250,4 +250,7 @@ export const paddleBattle: GameDefinition<PaddleBattleState, PaddleBattleView, P
     const max = Math.max(...state.order.map((id) => state.paddles[id]!.score));
     return state.order.filter((id) => state.paddles[id]!.score === max);
   },
+  getRanking(state) {
+    return [...state.order].sort((a, b) => state.paddles[b]!.score - state.paddles[a]!.score);
+  },
 };

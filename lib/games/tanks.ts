@@ -303,4 +303,18 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
     const winningTeam: TeamId = redKills > blueKills ? "red" : "blue";
     return state.order.filter((id) => state.players[id]!.team === winningTeam);
   },
+  getRanking(state) {
+    if (state.mode === "solo") {
+      return [...state.order].sort((a, b) => state.players[b]!.kills - state.players[a]!.kills);
+    }
+    const teamKills = (team: TeamId) => state.order.filter((id) => state.players[id]!.team === team).reduce((n, id) => n + state.players[id]!.kills, 0);
+    const redTotal = teamKills("red");
+    const blueTotal = teamKills("blue");
+    return [...state.order].sort((a, b) => {
+      const aTotal = state.players[a]!.team === "red" ? redTotal : blueTotal;
+      const bTotal = state.players[b]!.team === "red" ? redTotal : blueTotal;
+      if (aTotal !== bTotal) return bTotal - aTotal;
+      return state.players[b]!.kills - state.players[a]!.kills;
+    });
+  },
 };

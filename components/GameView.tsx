@@ -12,6 +12,8 @@ import TanksView from "@/components/games/TanksView";
 import PaddleBattleView from "@/components/games/PaddleBattleView";
 import VoidRaidersView from "@/components/games/VoidRaidersView";
 import WildestAnswerView from "@/components/games/WildestAnswerView";
+import PriceCheckView from "@/components/games/PriceCheckView";
+import LuckySpinView from "@/components/games/LuckySpinView";
 
 // Dispatches a game's view to its component, shared by GameHost (while
 // playing) and FinishedBanner (frozen on the final tick after the game
@@ -53,6 +55,10 @@ export default function GameView({
       return <VoidRaidersView view={view as any} onAction={onAction} meId={meId} players={players} />;
     case "wildest-answer":
       return <WildestAnswerView view={view as any} onAction={onAction} meId={meId} players={players} />;
+    case "price-check":
+      return <PriceCheckView view={view as any} onAction={onAction} meId={meId} players={players} />;
+    case "lucky-spin":
+      return <LuckySpinView view={view as any} onAction={onAction} meId={meId} players={players} />;
     default:
       return null;
   }

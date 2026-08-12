@@ -1454,4 +1454,12 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
     const winner = state.teams.A.score > state.teams.B.score ? state.teams.A : state.teams.B;
     return winner.memberIds;
   },
+  getRanking(state) {
+    // Team-based: the higher-scoring team's members all rank ahead of the
+    // other team's, in original member order within each team.
+    if (state.teams.A.score === state.teams.B.score) return [...state.teams.A.memberIds, ...state.teams.B.memberIds];
+    const winner = state.teams.A.score > state.teams.B.score ? state.teams.A : state.teams.B;
+    const loser = winner.id === "A" ? state.teams.B : state.teams.A;
+    return [...winner.memberIds, ...loser.memberIds];
+  },
 };

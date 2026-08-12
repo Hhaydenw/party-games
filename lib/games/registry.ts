@@ -10,6 +10,8 @@ import { tanks } from "./tanks";
 import { paddleBattle } from "./paddleBattle";
 import { voidRaiders } from "./voidRaiders";
 import { wildestAnswer } from "./wildestAnswer";
+import { priceCheck } from "./priceCheck";
+import { luckySpin } from "./luckySpin";
 
 // Games that are designed and on the roadmap but not built yet. Listed so
 // the lobby can show what's coming without pretending they're playable.
@@ -27,6 +29,8 @@ export const GAMES: Record<string, GameDefinition<any, any, any>> = {
   [paddleBattle.meta.id]: paddleBattle,
   [voidRaiders.meta.id]: voidRaiders,
   [wildestAnswer.meta.id]: wildestAnswer,
+  [priceCheck.meta.id]: priceCheck,
+  [luckySpin.meta.id]: luckySpin,
 };
 
 export function getGame(id: string): GameDefinition<any, any, any> | undefined {

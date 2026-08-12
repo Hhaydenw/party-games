@@ -7,7 +7,7 @@ invite link, everyone picks a display name, and you play together in real time.
 
 The platform (rooms, invite links, display names, lobby, reconnect) is built so
 new games drop in as self-contained plugins without touching anything else.
-Eleven games are fully implemented:
+Thirteen games are fully implemented:
 
 | Game | Category | Players |
 |---|---|---|
@@ -17,11 +17,29 @@ Eleven games are fully implemented:
 | **Doodle Guess** (Pictionary/skribbl-style) | 📱 Party | 3–10 |
 | **Name That Tune** | 📱 Party | 2–12 |
 | **Wildest Answer** (Quiplash-style prompt/vote) | 📱 Party | 4–8 |
+| **Price Check** (Price Is Right-style) | 📱 Party | 2–12 |
+| **Lucky Spin** (Wheel of Fortune-style) | 📱 Party | 2–6 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
 | **Paddle Battle** (Pong-style) | 📱 Party (real-time) | 2 |
 | **Void Raiders** (Galaga/Space Invaders-style) | 📱 Party (real-time) | 1–4 |
 | **The Game of Life** | 🎲 Board | 2–6 |
 | **Monopoly** | 🎲 Board | 2–6 |
+
+**Series Mode**: instead of one game, the host can queue up several in a row
+from the lobby (toggle **🏆 Series mode**, click games in the order you want
+them). Each game plays with its default settings; when it ends, that game's
+own final ranking converts to placement points (1st = 10, 2nd = 7, 3rd = 5,
+4th = 3, everyone else = 1) that add onto a running series leaderboard shown
+after every game, so wildly different scoring systems (trivia points vs.
+Monopoly net worth vs. Tanks kill counts) still combine fairly. The host taps
+**▶ Next game in series** to move on; the last game shows final standings and
+a **Back to lobby** button. Every game implements `getRanking` for this (see
+[How it's built](#how-its-built)); a game that doesn't would fall back to
+"winners tied for 1st, everyone else tied for last." Known simplification:
+each queued game uses its default options (no per-game options-in-queue
+customization yet), and there's no upfront check that every queued game's
+player-count range fits the room — if one doesn't, you'll find out (via the
+normal error message) when the series reaches it.
 
 **Sound**: every game that can meaningfully use sound effects has them — card
 plays, buzzers, reveals, shots, wins, and so on. There are no audio files to
@@ -149,6 +167,24 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   funnier. Points come from votes received plus a bonus for winning your
   group outright. Needs at least 4 players so every group always has
   someone outside it left to vote.
+- **Price Check** shows a real product (name, brand, photo) with its price
+  hidden and everyone guesses a number — closest guess (by absolute
+  difference) wins the round. Products come from
+  [dummyjson.com](https://dummyjson.com) — a free, keyless mock e-commerce
+  API with real product names/brands/photos and plausible prices, refreshed
+  as a live pool the same way the music games pull from iTunes. There's no
+  free/keyless Amazon (or similar real-retailer) product API, and scraping a
+  retailer's site would violate its Terms of Service, so this is the closest
+  "real product data, no API key, no ToS risk" option available — prices are
+  dummyjson's own catalog, not scraped or live-market prices.
+- **Lucky Spin** is an original Wheel-of-Fortune-style letter-guessing game
+  (original name/content, not affiliated with or copied from any TV show;
+  same "written fresh" approach as Family Feud and Wildest Answer's content).
+  Spin for a dollar value, guess a consonant — right guesses reveal it and
+  let you spin again, a miss passes your turn. Buy a vowel for $250 any time
+  it's your turn, or solve the puzzle outright; whoever solves banks that
+  round's earnings. A smaller wheel (16 wedges vs. the real show's ~24) with
+  the same flavor — mostly cash, occasional Bankrupt/Lose a Turn traps.
 
 ### Family Feud content note
 
@@ -234,6 +270,13 @@ survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-me
   "Genre") and the lobby renders controls for them automatically
   (`components/GameOptionsPanel.tsx`); the room manager validates/defaults them
   and passes the resolved values into `createInitialState`.
+- **Series Mode**: `lib/rooms.ts` holds `seriesQueue`/`seriesIndex`/
+  `seriesActive`/`seriesPoints` on the room; `startSeries`/`nextSeriesGame`
+  reuse the same internal `startGameInternal` helper regular `startGame`
+  does. When a queued game ends, the room manager calls the game's optional
+  `getRanking(state): PlayerId[]` (best to worst) and converts finish
+  position into placement points added onto `seriesPoints` — see the
+  `GameDefinition` interface and each game's `getRanking` implementation.
 
 Sessions (so refreshing the page or a dropped wifi connection doesn't kick you out
 of a room) are stored in the browser via `localStorage`, keyed per room code, and

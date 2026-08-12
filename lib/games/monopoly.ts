@@ -877,4 +877,14 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
     const max = Math.max(...values.map(([, v]) => v));
     return values.filter(([, v]) => v === max).map(([pid]) => pid);
   },
+  getRanking(state) {
+    // Bankrupt players always rank below anyone still solvent, regardless
+    // of any residual net worth; among each group, higher net worth first.
+    return [...state.order].sort((a, b) => {
+      const aBankrupt = state.players[a]!.bankrupt;
+      const bBankrupt = state.players[b]!.bankrupt;
+      if (aBankrupt !== bBankrupt) return aBankrupt ? 1 : -1;
+      return netWorth(state, b) - netWorth(state, a);
+    });
+  },
 };

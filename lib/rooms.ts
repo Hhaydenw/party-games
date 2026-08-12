@@ -38,9 +38,25 @@ interface InternalRoom {
   gameState: unknown;
   createdAt: number;
   lastActivity: number;
+  // Series Mode.
+  seriesQueue: string[];
+  seriesActive: boolean;
+  seriesIndex: number;
+  seriesPoints: Record<PlayerId, number>;
 }
 
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours of inactivity
+
+// Placement points awarded per game in a series, indexed by finish position
+// (0 = 1st place). Positions beyond this list all get the same 1 point.
+// This is position-based, not tie-aware: if a game's own ranking doesn't
+// distinguish a tie, both players still land on adjacent positions here
+// (e.g. a 2-way tie for 1st gets 10 and 7, not 10 and 10) — a deliberate
+// simplification rather than needing every game to report grouped ranks.
+const SERIES_PLACEMENT_POINTS = [10, 7, 5, 3];
+function pointsForPlacement(index: number): number {
+  return SERIES_PLACEMENT_POINTS[index] ?? 1;
+}
 
 export class RoomError extends Error {}
 
@@ -103,9 +119,25 @@ class RoomManager {
           const p = room.players.get(pid);
           if (p) p.score += 1;
         }
+        if (room.seriesActive) this.awardSeriesPoints(room, game, room.gameState);
       }
       this.touch(room);
       return true;
+    });
+  }
+
+  // Converts a finished game's own ranking (or, failing that, its winners)
+  // into placement points added to the room's running series total.
+  private awardSeriesPoints(room: InternalRoom, game: NonNullable<ReturnType<typeof getGame>>, gameState: unknown) {
+    let ranking: PlayerId[];
+    if (game.getRanking) {
+      ranking = game.getRanking(gameState);
+    } else {
+      const winners = new Set(game.getWinnerIds(gameState));
+      ranking = [...room.playerOrder.filter((id) => winners.has(id)), ...room.playerOrder.filter((id) => !winners.has(id))];
+    }
+    ranking.forEach((pid, i) => {
+      room.seriesPoints[pid] = (room.seriesPoints[pid] ?? 0) + pointsForPlacement(i);
     });
   }
 
@@ -156,6 +188,10 @@ class RoomManager {
       gameState: null,
       createdAt: Date.now(),
       lastActivity: Date.now(),
+      seriesQueue: [],
+      seriesActive: false,
+      seriesIndex: -1,
+      seriesPoints: {},
     };
     this.rooms.set(code, room);
     return { code, playerId, token };
@@ -217,24 +253,71 @@ class RoomManager {
     this.touch(room);
   }
 
+  // Shared by single-game startGame and Series Mode's startSeries/
+  // nextSeriesGame — validates player counts, builds initial state, and
+  // flips the room into "in-game".
+  private async startGameInternal(room: InternalRoom, gameId: string, options: GameOptions): Promise<void> {
+    const game = getGame(gameId);
+    if (!game) throw new RoomError("Unknown game.");
+    const players = room.playerOrder.map((id) => room.players.get(id)!).filter((p) => p.connected);
+    if (players.length < game.meta.minPlayers) throw new RoomError(`${game.meta.name} needs at least ${game.meta.minPlayers} players.`);
+    if (players.length > game.meta.maxPlayers) throw new RoomError(`${game.meta.name} supports at most ${game.meta.maxPlayers} players.`);
+    try {
+      room.gameState = await game.createInitialState(players, resolveOptions(game.meta, options));
+    } catch (err) {
+      throw new RoomError(err instanceof Error ? err.message : "Failed to start the game.");
+    }
+    room.gameId = gameId;
+    room.status = "in-game";
+    this.touch(room);
+    this.maybeStartTicking(room.code);
+  }
+
   async startGame(code: string, requesterId: PlayerId): Promise<void> {
     return this.withLock(code, async () => {
       const room = this.getRoomOrThrow(code);
       this.assertHost(room, requesterId);
       if (!room.gameId) throw new RoomError("Pick a game first.");
-      const game = getGame(room.gameId);
-      if (!game) throw new RoomError("Unknown game.");
-      const players = room.playerOrder.map((id) => room.players.get(id)!).filter((p) => p.connected);
-      if (players.length < game.meta.minPlayers) throw new RoomError(`${game.meta.name} needs at least ${game.meta.minPlayers} players.`);
-      if (players.length > game.meta.maxPlayers) throw new RoomError(`${game.meta.name} supports at most ${game.meta.maxPlayers} players.`);
-      try {
-        room.gameState = await game.createInitialState(players, resolveOptions(game.meta, room.gameOptions));
-      } catch (err) {
-        throw new RoomError(err instanceof Error ? err.message : "Failed to start the game.");
-      }
-      room.status = "in-game";
-      this.touch(room);
-      this.maybeStartTicking(code);
+      await this.startGameInternal(room, room.gameId, room.gameOptions);
+    });
+  }
+
+  // Host sets an ordered lineup of games (each played with its default
+  // options) before starting a series — a lightweight v1 rather than
+  // exposing full per-game options-in-queue customization.
+  setSeriesQueue(code: string, requesterId: PlayerId, gameIds: string[]): void {
+    const room = this.getRoomOrThrow(code);
+    this.assertHost(room, requesterId);
+    if (room.status !== "lobby") throw new RoomError("Can't change the series lineup mid-game.");
+    const filtered = gameIds.filter((id) => Boolean(getGame(id)));
+    if (filtered.length < 2) throw new RoomError("Add at least 2 games to build a series.");
+    room.seriesQueue = filtered;
+    this.touch(room);
+  }
+
+  async startSeries(code: string, requesterId: PlayerId): Promise<void> {
+    return this.withLock(code, async () => {
+      const room = this.getRoomOrThrow(code);
+      this.assertHost(room, requesterId);
+      if (room.seriesQueue.length < 2) throw new RoomError("Set up a series with at least 2 games first.");
+      room.seriesActive = true;
+      room.seriesIndex = 0;
+      room.seriesPoints = {};
+      for (const pid of room.playerOrder) room.seriesPoints[pid] = 0;
+      await this.startGameInternal(room, room.seriesQueue[0]!, {});
+    });
+  }
+
+  async nextSeriesGame(code: string, requesterId: PlayerId): Promise<void> {
+    return this.withLock(code, async () => {
+      const room = this.getRoomOrThrow(code);
+      this.assertHost(room, requesterId);
+      if (!room.seriesActive) throw new RoomError("No series in progress.");
+      if (room.status !== "finished") throw new RoomError("Finish the current game first.");
+      const nextIndex = room.seriesIndex + 1;
+      if (nextIndex >= room.seriesQueue.length) throw new RoomError("That was the last game in the series.");
+      room.seriesIndex = nextIndex;
+      await this.startGameInternal(room, room.seriesQueue[nextIndex]!, {});
     });
   }
 
@@ -261,6 +344,7 @@ class RoomManager {
         const p = room.players.get(pid);
         if (p) p.score += 1;
       }
+      if (room.seriesActive) this.awardSeriesPoints(room, game, room.gameState);
     }
     this.touch(room);
   }
@@ -273,6 +357,10 @@ class RoomManager {
     room.gameId = null;
     room.gameOptions = {};
     room.gameState = null;
+    room.seriesQueue = [];
+    room.seriesActive = false;
+    room.seriesIndex = -1;
+    room.seriesPoints = {};
     this.touch(room);
   }
 
@@ -289,6 +377,10 @@ class RoomManager {
       gameId: room.gameId,
       hostId: room.hostId,
       gameOptions: meta ? resolveOptions(meta, room.gameOptions) : {},
+      seriesQueue: room.seriesQueue,
+      seriesIndex: room.seriesIndex,
+      seriesActive: room.seriesActive,
+      seriesPoints: room.seriesPoints,
     };
   }
 

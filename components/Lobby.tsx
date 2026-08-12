@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { COMING_SOON, listAvailableGames } from "@/lib/games/registry";
 import { PlayerInfo, RoomSummary } from "@/lib/types";
 import { useParty } from "@/lib/socketClient";
@@ -12,13 +13,36 @@ import SoundSettingsButton from "@/components/SoundSettingsButton";
 const CATEGORY_LABEL: Record<string, string> = { card: "🃏 Card", board: "🎲 Board", party: "📱 Party" };
 
 export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
-  const { selectGame, startGame, error, clearError } = useParty();
+  const { selectGame, startGame, setSeriesQueue, startSeries, error, clearError } = useParty();
   const games = listAvailableGames();
   const selected = games.find((g) => g.id === room.gameId);
   const connectedCount = room.players.filter((p) => p.connected).length;
 
+  // Series Mode is a local toggle that changes what clicking a game card
+  // does (single-select-and-start vs. add-to-a-queue); it snaps on
+  // automatically once the room already has a queue set up, so joining
+  // players/guests see the right view without having to toggle it
+  // themselves.
+  const [seriesModeOn, setSeriesModeOn] = useState(false);
+  const seriesMode = seriesModeOn || room.seriesQueue.length > 0;
+
   const canStart =
     me.isHost && !!selected && connectedCount >= selected.minPlayers && connectedCount <= selected.maxPlayers;
+  const canStartSeries = me.isHost && room.seriesQueue.length >= 2;
+
+  // The server only accepts (and echoes back) a queue of 2+ games, so a
+  // 0-or-1-item lineup is purely local until it crosses that floor — this
+  // draft is what the host's card badges/list reflect while building it up.
+  const [queueDraft, setQueueDraft] = useState<string[]>(room.seriesQueue);
+
+  function toggleQueued(gameId: string) {
+    if (!me.isHost) return;
+    const next = queueDraft.includes(gameId) ? queueDraft.filter((id) => id !== gameId) : [...queueDraft, gameId];
+    setQueueDraft(next);
+    if (next.length >= 2) setSeriesQueue(next);
+  }
+
+  const displayedQueue = me.isHost ? queueDraft : room.seriesQueue;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 py-10">
@@ -34,29 +58,69 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
 
       <div className="grid gap-6 md:grid-cols-[1fr_320px]">
         <section className="card-surface rounded-3xl p-6">
-          <h2 className="mb-4 text-lg font-semibold">Choose a game</h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">{seriesMode ? "Build a series" : "Choose a game"}</h2>
+            {me.isHost && (
+              <div className="flex rounded-full bg-white/5 p-1 text-xs">
+                <button
+                  className={`rounded-full px-3 py-1 font-semibold transition ${!seriesMode ? "bg-accent text-white" : "text-slate-400"}`}
+                  onClick={() => setSeriesModeOn(false)}
+                >
+                  Single game
+                </button>
+                <button
+                  className={`rounded-full px-3 py-1 font-semibold transition ${seriesMode ? "bg-accent text-white" : "text-slate-400"}`}
+                  onClick={() => setSeriesModeOn(true)}
+                >
+                  🏆 Series mode
+                </button>
+              </div>
+            )}
+          </div>
+
+          {seriesMode && (
+            <p className="mb-4 text-xs text-slate-500">
+              Pick several games to play back-to-back — each game's own final ranking earns placement points (1st=10,
+              2nd=7, 3rd=5, 4th=3, else 1) that stack into one running series leaderboard. Each game plays with its
+              default settings.
+            </p>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-2">
-            {games.map((g) => (
-              <button
-                key={g.id}
-                disabled={!me.isHost}
-                onClick={() => selectGame(g.id)}
-                className={`rounded-2xl border p-4 text-left transition disabled:cursor-default ${
-                  room.gameId === g.id
-                    ? "border-accent bg-accent/10"
-                    : "border-white/10 bg-white/[0.03] hover:border-white/20"
-                }`}
-              >
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  {CATEGORY_LABEL[g.category]}
-                </div>
-                <div className="text-lg font-bold">{g.name}</div>
-                <p className="mt-1 text-sm text-slate-400">{g.tagline}</p>
-                <p className="mt-2 text-xs text-slate-500">
-                  {g.minPlayers}–{g.maxPlayers} players
-                </p>
-              </button>
-            ))}
+            {games.map((g) => {
+              const queuedIndex = displayedQueue.indexOf(g.id);
+              const isQueued = queuedIndex !== -1;
+              return (
+                <button
+                  key={g.id}
+                  disabled={!me.isHost}
+                  onClick={() => (seriesMode ? toggleQueued(g.id) : selectGame(g.id))}
+                  className={`relative rounded-2xl border p-4 text-left transition disabled:cursor-default ${
+                    seriesMode
+                      ? isQueued
+                        ? "border-gold bg-gold/10"
+                        : "border-white/10 bg-white/[0.03] hover:border-white/20"
+                      : room.gameId === g.id
+                        ? "border-accent bg-accent/10"
+                        : "border-white/10 bg-white/[0.03] hover:border-white/20"
+                  }`}
+                >
+                  {isQueued && (
+                    <span className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-gold text-xs font-black text-ink">
+                      {queuedIndex + 1}
+                    </span>
+                  )}
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {CATEGORY_LABEL[g.category]}
+                  </div>
+                  <div className="text-lg font-bold">{g.name}</div>
+                  <p className="mt-1 text-sm text-slate-400">{g.tagline}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {g.minPlayers}–{g.maxPlayers} players
+                  </p>
+                </button>
+              );
+            })}
             {COMING_SOON.map((g) => (
               <div key={g.id} className="rounded-2xl border border-dashed border-white/10 p-4 opacity-50">
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -69,24 +133,40 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
             ))}
           </div>
 
-          {selected && <GameOptionsPanel meta={selected} options={room.gameOptions} isHost={me.isHost} />}
+          {!seriesMode && selected && <GameOptionsPanel meta={selected} options={room.gameOptions} isHost={me.isHost} />}
 
-          {me.isHost ? (
-            <div className="mt-6 flex items-center gap-4">
-              <button className="btn-primary" disabled={!canStart} onClick={startGame}>
-                Start game
-              </button>
-              {selected && !canStart && (
-                <p className="text-sm text-slate-400">
-                  Needs {selected.minPlayers}–{selected.maxPlayers} connected players (currently {connectedCount}).
-                </p>
-              )}
-              {!selected && <p className="text-sm text-slate-400">Pick a game above to get started.</p>}
-            </div>
+          {!seriesMode ? (
+            me.isHost ? (
+              <div className="mt-6 flex items-center gap-4">
+                <button className="btn-primary" disabled={!canStart} onClick={startGame}>
+                  Start game
+                </button>
+                {selected && !canStart && (
+                  <p className="text-sm text-slate-400">
+                    Needs {selected.minPlayers}–{selected.maxPlayers} connected players (currently {connectedCount}).
+                  </p>
+                )}
+                {!selected && <p className="text-sm text-slate-400">Pick a game above to get started.</p>}
+              </div>
+            ) : (
+              <p className="mt-6 text-sm text-slate-400">
+                {selected ? `Waiting for the host to start ${selected.name}…` : "Waiting for the host to pick a game…"}
+              </p>
+            )
           ) : (
-            <p className="mt-6 text-sm text-slate-400">
-              {selected ? `Waiting for the host to start ${selected.name}…` : "Waiting for the host to pick a game…"}
-            </p>
+            <div className="mt-6">
+              <p className="mb-2 text-sm text-slate-300">
+                Lineup: {displayedQueue.length === 0 ? "none yet" : displayedQueue.map((id) => games.find((g) => g.id === id)?.name ?? id).join(" → ")}
+              </p>
+              {me.isHost ? (
+                <button className="btn-primary" disabled={!canStartSeries} onClick={startSeries}>
+                  🏆 Start series ({room.seriesQueue.length} game{room.seriesQueue.length === 1 ? "" : "s"})
+                </button>
+              ) : (
+                <p className="text-sm text-slate-400">Waiting for the host to start the series…</p>
+              )}
+              {me.isHost && displayedQueue.length === 1 && <p className="mt-2 text-xs text-slate-500">Add at least one more game.</p>}
+            </div>
           )}
           {error && (
             <p className="mt-3 cursor-pointer text-sm text-accent" onClick={clearError}>
