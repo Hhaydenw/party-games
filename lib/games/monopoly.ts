@@ -197,6 +197,10 @@ export interface MonopolyPropertyView {
   ownerId: PlayerId | null;
   houses: number;
   mortgaged: boolean;
+  // Rent an owner would currently collect here, so players can tell what
+  // landing on someone's property will cost before they roll. For
+  // utilities this is an estimate (average dice roll of 7).
+  currentRent: number | null;
 }
 
 export interface MonopolyAuctionView {
@@ -219,7 +223,14 @@ export interface MonopolyView {
   auction: MonopolyAuctionView | null;
   trades: TradeOffer[];
   lastRoll: [number, number] | null;
-  board: { type: TileDef["type"]; name: string; color?: PropertyColor; price?: number }[];
+  board: {
+    type: TileDef["type"];
+    name: string;
+    color?: PropertyColor;
+    price?: number;
+    houseCost?: number;
+    rent?: [number, number, number, number, number, number];
+  }[];
   properties: MonopolyPropertyView[];
   players: {
     id: PlayerId;
@@ -794,8 +805,9 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
   getPlayerView(state, playerId) {
     const current = state.order[state.turnIndex]!;
     const properties: MonopolyPropertyView[] = BOARD.map((tile, index) => {
-      if (!isOwnable(tile)) return { index, name: tile.name, ownerId: null, houses: 0, mortgaged: false };
+      if (!isOwnable(tile)) return { index, name: tile.name, ownerId: null, houses: 0, mortgaged: false, currentRent: null };
       const owner = ownerOf(state, index);
+      const mortgaged = owner ? state.players[owner]!.mortgaged.includes(index) : false;
       return {
         index,
         name: tile.name,
@@ -803,7 +815,8 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
         price: priceOf(tile),
         ownerId: owner,
         houses: owner ? state.players[owner]!.houses[index] ?? 0 : 0,
-        mortgaged: owner ? state.players[owner]!.mortgaged.includes(index) : false,
+        mortgaged,
+        currentRent: owner && !mortgaged ? computeRent(state, index, owner, 7) : null,
       };
     });
     const takenPieces = new Set(Object.values(state.players).map((p) => p.piece).filter((p): p is string => p !== null));
@@ -827,7 +840,14 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
         : null,
       trades: state.trades,
       lastRoll: state.lastRoll,
-      board: BOARD.map((t) => ({ type: t.type, name: t.name, color: t.type === "property" ? t.color : undefined, price: isOwnable(t) ? priceOf(t) : undefined })),
+      board: BOARD.map((t) => ({
+        type: t.type,
+        name: t.name,
+        color: t.type === "property" ? t.color : undefined,
+        price: isOwnable(t) ? priceOf(t) : undefined,
+        houseCost: t.type === "property" ? t.houseCost : undefined,
+        rent: t.type === "property" ? t.rent : undefined,
+      })),
       properties,
       players: state.order.map((pid) => {
         const p = state.players[pid]!;

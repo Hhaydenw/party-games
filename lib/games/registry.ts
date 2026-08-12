@@ -4,6 +4,7 @@ import { trivia } from "./trivia";
 import { drawing } from "./drawing";
 import { familyFeud } from "./familyFeud";
 import { nameThatTune } from "./nameThatTune";
+import { finishLyric } from "./finishLyric";
 import { life } from "./life";
 import { monopoly } from "./monopoly";
 import { tanks } from "./tanks";
@@ -18,6 +19,7 @@ export const GAMES: Record<string, GameDefinition<any, any, any>> = {
   [drawing.meta.id]: drawing,
   [familyFeud.meta.id]: familyFeud,
   [nameThatTune.meta.id]: nameThatTune,
+  [finishLyric.meta.id]: finishLyric,
   [life.meta.id]: life,
   [monopoly.meta.id]: monopoly,
   [tanks.meta.id]: tanks,

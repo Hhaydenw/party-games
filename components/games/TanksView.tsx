@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { TanksAction, TanksView as ViewType } from "@/lib/games/tanks";
 import { PlayerInfo } from "@/lib/types";
+import { playSound } from "@/lib/sound";
 
 const TEAM_COLOR: Record<string, string> = { red: "#ef4444", blue: "#3b82f6" };
 const SOLO_COLORS = ["#e94560", "#f2b705", "#22c55e", "#3b82f6", "#a855f7", "#f97316", "#14b8a6", "#ec4899"];
@@ -76,9 +77,13 @@ export default function TanksView({
   }
 
   function startShooting() {
+    playSound("shoot");
     onAction({ type: "shoot" });
     if (shootInterval.current) return;
-    shootInterval.current = setInterval(() => onAction({ type: "shoot" }), 120);
+    shootInterval.current = setInterval(() => {
+      playSound("shoot");
+      onAction({ type: "shoot" });
+    }, 120);
   }
   function stopShooting() {
     if (shootInterval.current) {
@@ -140,6 +145,26 @@ export default function TanksView({
 
   const me = view.players.find((p) => p.id === meId);
   const remainingSec = Math.max(0, Math.ceil((view.matchEndsAt - Date.now()) / 1000));
+
+  // React to my own tank's health/aliveness/kills changing between ticks —
+  // that's the signal for "I got hit", "I died", or "I got a kill".
+  const prevMe = useRef(me);
+  useEffect(() => {
+    if (me && prevMe.current) {
+      if (me.health < prevMe.current.health) playSound("hit");
+      if (prevMe.current.alive && !me.alive) playSound("explosion");
+      if (me.kills > prevMe.current.kills) playSound("success");
+    }
+    prevMe.current = me;
+  }, [me]);
+
+  const announcedEnd = useRef(false);
+  useEffect(() => {
+    if (view.phase === "finished" && !announcedEnd.current) {
+      announcedEnd.current = true;
+      playSound("win");
+    }
+  }, [view.phase]);
 
   return (
     <div className="flex flex-col gap-4">

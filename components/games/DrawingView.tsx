@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DrawingAction, DrawingView as ViewType, Stroke } from "@/lib/games/drawing";
 import { PlayerInfo } from "@/lib/types";
+import { playSound } from "@/lib/sound";
 
 const PALETTE = ["#f5f5f5", "#1a1a2e", "#e94560", "#f2b705", "#22c55e", "#3b82f6", "#a855f7", "#78350f"];
 const WIDTHS = [3, 6, 12];
@@ -63,6 +64,22 @@ export default function DrawingView({
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     for (const stroke of view.strokes) drawStroke(ctx, stroke, canvas.width, canvas.height);
   }, [view.strokes]);
+
+  const guessCountRef = useRef(view.guesses.length);
+  useEffect(() => {
+    if (view.guesses.length > guessCountRef.current) {
+      const last = view.guesses[view.guesses.length - 1];
+      if (last?.correct) playSound(last.playerId === meId ? "success" : "select");
+    }
+    guessCountRef.current = view.guesses.length;
+  }, [view.guesses, meId]);
+
+  const wasRoundEnd = useRef(view.phase === "roundEnd" || view.phase === "finished");
+  useEffect(() => {
+    const isEnd = view.phase === "roundEnd" || view.phase === "finished";
+    if (isEnd && !wasRoundEnd.current) playSound("reveal");
+    wasRoundEnd.current = isEnd;
+  }, [view.phase]);
 
   // Local countdown ticker; the drawer's client is the one that fires timeUp.
   useEffect(() => {

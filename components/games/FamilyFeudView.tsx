@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FeudAction, FeudView as ViewType } from "@/lib/games/familyFeud";
 import { PlayerInfo } from "@/lib/types";
+import { playSound } from "@/lib/sound";
 
 const TEAM_STYLE: Record<string, { bg: string; ring: string; text: string; solid: string }> = {
   A: { bg: "bg-red-500/15", ring: "ring-red-400/50", text: "text-red-400", solid: "bg-red-600" },
@@ -16,6 +17,7 @@ function AnswerTile({ text, points, revealed, index }: { text: string | null; po
   useEffect(() => {
     if (revealed && !wasRevealed.current) {
       setJustRevealed(true);
+      playSound("reveal");
       const t = setTimeout(() => setJustRevealed(false), 500);
       return () => clearTimeout(t);
     }
@@ -45,6 +47,11 @@ function AnswerTile({ text, points, revealed, index }: { text: string | null; po
 }
 
 function Strikes({ count }: { count: number }) {
+  const prevCount = useRef(count);
+  useEffect(() => {
+    if (count > prevCount.current) playSound("fail");
+    prevCount.current = count;
+  }, [count]);
   return (
     <div className="flex gap-2">
       {[0, 1, 2].map((i) => (
@@ -145,7 +152,13 @@ export default function FamilyFeudView({
           {!view.faceoffBuzzedTeam && (
             <>
               {isMyTeamsCaptain && !view.faceoffAttempted.includes(view.yourTeam) ? (
-                <button className="btn-gold animate-pulse text-lg shadow-[0_0_20px_rgba(242,183,5,0.5)]" onClick={() => onAction({ type: "buzz" })}>
+                <button
+                  className="btn-gold animate-pulse text-lg shadow-[0_0_20px_rgba(242,183,5,0.5)]"
+                  onClick={() => {
+                    playSound("buzzer");
+                    onAction({ type: "buzz" });
+                  }}
+                >
                   🔔 Buzz in!
                 </button>
               ) : (

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MonopolyAction, MonopolyView as ViewType } from "@/lib/games/monopoly";
 import { PlayerInfo } from "@/lib/types";
+import { playSound } from "@/lib/sound";
 
 const PLAYER_COLORS = ["#e94560", "#f2b705", "#22c55e", "#3b82f6", "#a855f7", "#f97316"];
 
@@ -18,6 +19,17 @@ const COLOR_SWATCH: Record<string, string> = {
 };
 
 const DIE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+
+const CORNER_ICON: Record<string, string> = { go: "➡️", jail: "🔒", freeParking: "🅿️", goToJail: "👮" };
+function nonPropertyIcon(type: string, name: string) {
+  if (CORNER_ICON[type]) return CORNER_ICON[type]!;
+  if (type === "chest") return "📦";
+  if (type === "chance") return "❓";
+  if (type === "tax") return "💵";
+  if (type === "railroad") return "🚂";
+  if (type === "utility") return name.startsWith("Electric") ? "💡" : "🚰";
+  return "";
+}
 
 function money(n: number) {
   return `$${n.toLocaleString()}`;
@@ -92,6 +104,20 @@ export default function MonopolyView({
     }
   }, [view.lastRoll]);
 
+  const wasMyTurn = useRef(view.yourTurn);
+  useEffect(() => {
+    if (view.yourTurn && !wasMyTurn.current) playSound("turn");
+    wasMyTurn.current = view.yourTurn;
+  }, [view.yourTurn]);
+
+  const announcedEnd = useRef(false);
+  useEffect(() => {
+    if (view.phase === "finished" && !announcedEnd.current) {
+      announcedEnd.current = true;
+      playSound("win");
+    }
+  }, [view.phase]);
+
   function toggleFullscreen() {
     if (document.fullscreenElement) {
       document.exitFullscreen();
@@ -102,6 +128,7 @@ export default function MonopolyView({
 
   function handleRoll() {
     setRolling(true);
+    playSound("click");
     onAction({ type: "roll" });
   }
 
@@ -207,35 +234,50 @@ export default function MonopolyView({
         </div>
       )}
 
-      {/* Board: real 11x11 square perimeter layout */}
-      <div className="relative mx-auto aspect-square w-full max-w-3xl rounded-2xl border border-white/10 bg-panel">
+      {/* Board: real 11x11 square perimeter layout, sized up so prices/rent are legible */}
+      <div
+        className="relative mx-auto aspect-square w-full max-w-[900px] rounded-2xl border-4 border-emerald-900 p-2 shadow-[0_10px_40px_rgba(0,0,0,0.5)]"
+        style={{ background: "radial-gradient(circle at 50% 50%, #0d5c3f 0%, #073b28 100%)" }}
+      >
         {view.board.map((tile, i) => {
           const { row, col } = tileGridPos(i);
           const prop = view.properties[i]!;
           const occupants = view.players.filter((p) => p.position === i && !p.bankrupt);
           const isCorner = i === 0 || i === 10 || i === 20 || i === 30;
+          const isOwnable = tile.price !== undefined;
           return (
             <div
               key={i}
-              className={`absolute flex flex-col items-center justify-center gap-0.5 border border-black/20 p-0.5 text-center text-[6px] leading-tight sm:text-[8px] ${
-                isCorner ? "bg-white/10" : "bg-white/5"
+              className={`absolute flex flex-col items-center justify-center gap-0.5 overflow-hidden border border-black/30 p-0.5 text-center leading-tight ${
+                isCorner ? "z-10 bg-slate-100 text-[7px] font-bold text-ink sm:text-[9px]" : "bg-slate-50 text-[6px] text-ink sm:text-[7.5px]"
               }`}
               style={{ left: `${(col / 11) * 100}%`, top: `${(row / 11) * 100}%`, width: `${100 / 11}%`, height: `${100 / 11}%` }}
               title={tile.name}
             >
-              {tile.color && <span className="h-1 w-full rounded-sm sm:h-1.5" style={{ backgroundColor: COLOR_SWATCH[tile.color] }} />}
-              <span className="line-clamp-2 text-slate-300">{tile.name}</span>
+              {tile.color && <span className="h-1.5 w-full shrink-0 sm:h-2.5" style={{ backgroundColor: COLOR_SWATCH[tile.color] }} />}
+              {isCorner ? (
+                <span className="text-base sm:text-2xl">{nonPropertyIcon(tile.type, tile.name)}</span>
+              ) : (
+                <span className="text-xs sm:text-base">{nonPropertyIcon(tile.type, tile.name)}</span>
+              )}
+              <span className="line-clamp-2 font-semibold text-ink/90">{tile.name}</span>
+              {isOwnable && !prop.ownerId && <span className="font-bold text-emerald-700">{money(tile.price!)}</span>}
               {prop.ownerId && (
-                <span className="flex items-center gap-0.5">
-                  <span className="h-1 w-1 rounded-full sm:h-1.5 sm:w-1.5" style={{ backgroundColor: colorFor(prop.ownerId) }} />
-                  {prop.mortgaged && <span className="text-accent">M</span>}
+                <span className="flex flex-col items-center gap-0.5">
+                  <span className="flex items-center gap-0.5">
+                    <span className="h-1.5 w-1.5 rounded-full sm:h-2 sm:w-2" style={{ backgroundColor: colorFor(prop.ownerId) }} />
+                    {prop.mortgaged && <span className="font-bold text-accent">Mortgaged</span>}
+                  </span>
+                  {!prop.mortgaged && prop.currentRent !== null && (
+                    <span className="font-bold text-accent">Rent {money(prop.currentRent)}</span>
+                  )}
                   {prop.houses > 0 && <span>{prop.houses === 5 ? "🏨" : "🏠".repeat(prop.houses)}</span>}
                 </span>
               )}
               {occupants.length > 0 && (
                 <div className="absolute -bottom-1 flex flex-wrap justify-center gap-0.5">
                   {occupants.map((p) => (
-                    <span key={p.id} className="text-xs transition-all duration-500 sm:text-sm" style={{ filter: `drop-shadow(0 0 2px ${colorFor(p.id)})` }}>
+                    <span key={p.id} className="text-sm transition-all duration-500 sm:text-lg" style={{ filter: `drop-shadow(0 0 2px ${colorFor(p.id)})` }}>
                       {p.piece}
                     </span>
                   ))}
@@ -244,6 +286,9 @@ export default function MonopolyView({
             </div>
           );
         })}
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 select-none text-4xl font-black tracking-widest text-emerald-100/10 sm:text-6xl">
+          MONOPOLY
+        </div>
       </div>
 
       {/* Players */}
@@ -321,7 +366,14 @@ export default function MonopolyView({
                 Buy <span className="font-semibold">{pendingTile.name}</span> for {money(pendingTile.price ?? 0)}?
               </p>
               <div className="flex gap-2">
-                <button className="btn-primary" onClick={() => onAction({ type: "buyProperty" })} disabled={me.cash < (pendingTile.price ?? 0)}>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    playSound("success");
+                    onAction({ type: "buyProperty" });
+                  }}
+                  disabled={me.cash < (pendingTile.price ?? 0)}
+                >
                   Buy
                 </button>
                 <button className="btn-secondary" onClick={() => onAction({ type: "declineProperty" })}>

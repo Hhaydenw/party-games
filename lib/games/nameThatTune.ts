@@ -1,119 +1,11 @@
 import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/types";
+import { DECADE_CHOICES, GENRE_CHOICES, SongResult, searchSongs } from "./songSource";
 
-// A "name that tune" style game: the server fetches a real 30-second preview
-// clip for a well-known song from Apple's free, keyless iTunes Search API,
-// everyone races to type the title (and artist, for a bonus), points
-// awarded by guess order.
-
-type Genre = "pop" | "rock" | "hiphop" | "country" | "rnb" | "electronic";
-type Decade = "1960s" | "1970s" | "1980s" | "1990s" | "2000s" | "2010s" | "2020s";
-
-interface SongDef {
-  title: string;
-  artist: string;
-  genre: Genre;
-  decade: Decade;
-}
-
-// Hand-picked pool used for (a) older decades — Apple's live charts are
-// inherently "right now" and carry no decade metadata, so this is the only
-// source for 60s-2000s rounds — and (b) as a fallback if the live chart
-// fetch below fails for any reason.
-const HISTORIC_BANK: SongDef[] = [
-  { title: "Billie Jean", artist: "Michael Jackson", genre: "pop", decade: "1980s" },
-  { title: "Bohemian Rhapsody", artist: "Queen", genre: "rock", decade: "1970s" },
-  { title: "Uptown Funk", artist: "Mark Ronson", genre: "pop", decade: "2010s" },
-  { title: "Shake It Off", artist: "Taylor Swift", genre: "pop", decade: "2010s" },
-  { title: "Sweet Child O' Mine", artist: "Guns N' Roses", genre: "rock", decade: "1980s" },
-  { title: "Hey Jude", artist: "The Beatles", genre: "rock", decade: "1960s" },
-  { title: "Dancing Queen", artist: "ABBA", genre: "pop", decade: "1970s" },
-  { title: "I Want It That Way", artist: "Backstreet Boys", genre: "pop", decade: "1990s" },
-  { title: "Rolling in the Deep", artist: "Adele", genre: "pop", decade: "2010s" },
-  { title: "Don't Stop Believin'", artist: "Journey", genre: "rock", decade: "1980s" },
-  { title: "Smells Like Teen Spirit", artist: "Nirvana", genre: "rock", decade: "1990s" },
-  { title: "Livin' on a Prayer", artist: "Bon Jovi", genre: "rock", decade: "1980s" },
-  { title: "Africa", artist: "Toto", genre: "rock", decade: "1980s" },
-  { title: "Wonderwall", artist: "Oasis", genre: "rock", decade: "1990s" },
-  { title: "I Will Survive", artist: "Gloria Gaynor", genre: "pop", decade: "1970s" },
-  { title: "Mr. Brightside", artist: "The Killers", genre: "rock", decade: "2000s" },
-  { title: "Since U Been Gone", artist: "Kelly Clarkson", genre: "pop", decade: "2000s" },
-  { title: "Crazy in Love", artist: "Beyoncé", genre: "rnb", decade: "2000s" },
-  { title: "Party in the U.S.A.", artist: "Miley Cyrus", genre: "pop", decade: "2000s" },
-  { title: "Blinding Lights", artist: "The Weeknd", genre: "pop", decade: "2020s" },
-  { title: "Shape of You", artist: "Ed Sheeran", genre: "pop", decade: "2010s" },
-  { title: "Hotel California", artist: "Eagles", genre: "rock", decade: "1970s" },
-  { title: "bad guy", artist: "Billie Eilish", genre: "pop", decade: "2010s" },
-  { title: "Old Town Road", artist: "Lil Nas X", genre: "hiphop", decade: "2010s" },
-  { title: "Thriller", artist: "Michael Jackson", genre: "pop", decade: "1980s" },
-  { title: "Paint It Black", artist: "The Rolling Stones", genre: "rock", decade: "1960s" },
-  { title: "Superstition", artist: "Stevie Wonder", genre: "rnb", decade: "1970s" },
-  { title: "Get Lucky", artist: "Daft Punk", genre: "electronic", decade: "2010s" },
-  { title: "Umbrella", artist: "Rihanna", genre: "pop", decade: "2000s" },
-  { title: "Toxic", artist: "Britney Spears", genre: "pop", decade: "2000s" },
-  { title: "HUMBLE.", artist: "Kendrick Lamar", genre: "hiphop", decade: "2010s" },
-  { title: "Lose Yourself", artist: "Eminem", genre: "hiphop", decade: "2000s" },
-  { title: "Fancy", artist: "Iggy Azalea", genre: "hiphop", decade: "2010s" },
-  { title: "Take On Me", artist: "a-ha", genre: "pop", decade: "1980s" },
-  { title: "Sweet Caroline", artist: "Neil Diamond", genre: "pop", decade: "1970s" },
-  { title: "Girls Just Want to Have Fun", artist: "Cyndi Lauper", genre: "pop", decade: "1980s" },
-  { title: "Jolene", artist: "Dolly Parton", genre: "country", decade: "1970s" },
-  { title: "Friends in Low Places", artist: "Garth Brooks", genre: "country", decade: "1990s" },
-  { title: "Before He Cheats", artist: "Carrie Underwood", genre: "country", decade: "2000s" },
-  { title: "Cruise", artist: "Florida Georgia Line", genre: "country", decade: "2010s" },
-  { title: "Chandelier", artist: "Sia", genre: "pop", decade: "2010s" },
-  { title: "Someone Like You", artist: "Adele", genre: "pop", decade: "2010s" },
-  { title: "Royals", artist: "Lorde", genre: "pop", decade: "2010s" },
-  { title: "Havana", artist: "Camila Cabello", genre: "pop", decade: "2010s" },
-  { title: "Despacito", artist: "Luis Fonsi", genre: "pop", decade: "2010s" },
-  { title: "Uptown Girl", artist: "Billy Joel", genre: "pop", decade: "1980s" },
-  { title: "September", artist: "Earth, Wind & Fire", genre: "rnb", decade: "1970s" },
-  { title: "Le Freak", artist: "Chic", genre: "rnb", decade: "1970s" },
-  { title: "Stayin' Alive", artist: "Bee Gees", genre: "pop", decade: "1970s" },
-  { title: "I Wanna Dance with Somebody", artist: "Whitney Houston", genre: "pop", decade: "1980s" },
-  { title: "Like a Prayer", artist: "Madonna", genre: "pop", decade: "1980s" },
-  { title: "Vogue", artist: "Madonna", genre: "pop", decade: "1990s" },
-  { title: "No Scrubs", artist: "TLC", genre: "rnb", decade: "1990s" },
-  { title: "Waterfalls", artist: "TLC", genre: "rnb", decade: "1990s" },
-  { title: "My Heart Will Go On", artist: "Celine Dion", genre: "pop", decade: "1990s" },
-  { title: "Torn", artist: "Natalie Imbruglia", genre: "pop", decade: "1990s" },
-  { title: "Complicated", artist: "Avril Lavigne", genre: "pop", decade: "2000s" },
-  { title: "Hey Ya!", artist: "OutKast", genre: "hiphop", decade: "2000s" },
-  { title: "In Da Club", artist: "50 Cent", genre: "hiphop", decade: "2000s" },
-  { title: "Chasing Cars", artist: "Snow Patrol", genre: "rock", decade: "2000s" },
-  { title: "Use Somebody", artist: "Kings of Leon", genre: "rock", decade: "2000s" },
-  { title: "Seven Nation Army", artist: "The White Stripes", genre: "rock", decade: "2000s" },
-  { title: "Somebody That I Used to Know", artist: "Gotye", genre: "pop", decade: "2010s" },
-  { title: "Radioactive", artist: "Imagine Dragons", genre: "rock", decade: "2010s" },
-  { title: "Counting Stars", artist: "OneRepublic", genre: "pop", decade: "2010s" },
-  { title: "Happy", artist: "Pharrell Williams", genre: "pop", decade: "2010s" },
-  { title: "Can't Stop the Feeling!", artist: "Justin Timberlake", genre: "pop", decade: "2010s" },
-  { title: "Levitating", artist: "Dua Lipa", genre: "pop", decade: "2020s" },
-  { title: "Watermelon Sugar", artist: "Harry Styles", genre: "pop", decade: "2020s" },
-  { title: "drivers license", artist: "Olivia Rodrigo", genre: "pop", decade: "2020s" },
-  { title: "As It Was", artist: "Harry Styles", genre: "pop", decade: "2020s" },
-  { title: "Anti-Hero", artist: "Taylor Swift", genre: "pop", decade: "2020s" },
-];
-
-const GENRE_CHOICES: { value: string; label: string }[] = [
-  { value: "all", label: "Any genre" },
-  { value: "pop", label: "Pop" },
-  { value: "rock", label: "Rock" },
-  { value: "hiphop", label: "Hip-Hop" },
-  { value: "country", label: "Country" },
-  { value: "rnb", label: "R&B" },
-  { value: "electronic", label: "Electronic" },
-];
-
-const DECADE_CHOICES: { value: string; label: string }[] = [
-  { value: "all", label: "Any decade" },
-  { value: "1960s", label: "60s" },
-  { value: "1970s", label: "70s" },
-  { value: "1980s", label: "80s" },
-  { value: "1990s", label: "90s" },
-  { value: "2000s", label: "2000s" },
-  { value: "2010s", label: "2010s" },
-  { value: "2020s", label: "2020s" },
-];
+// A "name that tune" style game: the server searches Apple's free, keyless
+// iTunes Search API for real songs matching the chosen genre/decade (which
+// doubles as both "find the biggest songs" and "get a preview clip" in one
+// call — see `lib/games/songSource.ts`), everyone races to type the title
+// (and artist, for a bonus), points awarded by guess order.
 
 const ROUND_MS = 25_000;
 const DEFAULT_ROUNDS = 8;
@@ -123,88 +15,14 @@ const DEFAULT_ROUNDS = 8;
 // one) doesn't serve the same songs again until the pool is exhausted.
 const playedTitles = new Set<string>();
 
-interface ITunesResult {
-  previewUrl?: string;
-  artworkUrl100?: string;
-}
-
-// Apple's classic genre IDs for their public iTunes RSS chart feeds.
-const GENRE_TO_CHART_ID: Record<Genre, number> = {
-  pop: 14,
-  rock: 21,
-  hiphop: 18,
-  country: 6,
-  rnb: 15,
-  electronic: 7,
-};
-
-interface ChartEntry {
-  "im:name"?: { label?: string };
-  "im:artist"?: { label?: string };
-}
-
-// Pulls Apple's live, publicly-published Top 100 songs chart — optionally
-// scoped to one genre via the classic iTunes RSS feed. This is free, keyless,
-// and refreshed by Apple on its own schedule, so it's both far bigger than
-// anything we could hand-type and stays current without us maintaining it.
-// Only meaningful for "now"-ish rounds — see the decade check at the call
-// site — since the chart carries no historical/decade information.
-async function fetchChartBank(genre: string, currentDecade: string): Promise<SongDef[]> {
-  const genreId = genre !== "all" ? GENRE_TO_CHART_ID[genre as Genre] : undefined;
-  const url = genreId
-    ? `https://itunes.apple.com/us/rss/topsongs/limit=100/genre=${genreId}/json`
-    : `https://itunes.apple.com/us/rss/topsongs/limit=100/json`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = (await res.json()) as { feed?: { entry?: ChartEntry[] } };
-    const entries = data.feed?.entry ?? [];
-    return entries
-      .map((e) => ({ title: e["im:name"]?.label, artist: e["im:artist"]?.label }))
-      .filter((s): s is { title: string; artist: string } => Boolean(s.title && s.artist))
-      .map((s) => ({
-        title: s.title,
-        artist: s.artist,
-        genre: (genre !== "all" ? (genre as Genre) : "pop") as Genre,
-        decade: currentDecade as Decade,
-      }));
-  } catch {
-    return [];
-  }
-}
-
-async function fetchPreview(song: SongDef): Promise<{ previewUrl: string; artworkUrl: string } | null> {
-  const term = encodeURIComponent(`${song.title} ${song.artist}`);
-  const url = `https://itunes.apple.com/search?term=${term}&media=music&entity=song&limit=1`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { results?: ITunesResult[] };
-    const hit = data.results?.[0];
-    if (!hit?.previewUrl) return null;
-    return { previewUrl: hit.previewUrl, artworkUrl: hit.artworkUrl100 ?? "" };
-  } catch {
-    return null;
-  }
-}
-
-// Tries songs from the pre-shuffled order (skipping ones already used this
-// game) until one returns a playable clip. Prefers songs not yet played in
-// any previous game on this server; if that pool runs dry, falls back to the
-// full candidate list rather than dead-ending the game.
-async function pickNextSong(songOrder: number[], usedIndices: number[], bank: SongDef[]): Promise<{ index: number; title: string; artist: string; previewUrl: string } | null> {
-  const remaining = songOrder.filter((i) => !usedIndices.includes(i));
-  const fresh = remaining.filter((i) => !playedTitles.has(bank[i]!.title));
+function pickNext(pool: SongResult[], order: number[], used: number[]): { index: number; song: SongResult } | null {
+  const remaining = order.filter((i) => !used.includes(i));
+  const fresh = remaining.filter((i) => !playedTitles.has(pool[i]!.title));
   const candidates = fresh.length > 0 ? fresh : remaining;
-  for (const index of candidates) {
-    const song = bank[index]!;
-    const preview = await fetchPreview(song);
-    if (preview) {
-      playedTitles.add(song.title);
-      return { index, title: song.title, artist: song.artist, previewUrl: preview.previewUrl };
-    }
-  }
-  return null;
+  if (candidates.length === 0) return null;
+  const index = candidates[0]!;
+  playedTitles.add(pool[index]!.title);
+  return { index, song: pool[index]! };
 }
 
 export type TunePhase = "guessing" | "roundEnd" | "finished";
@@ -221,8 +39,8 @@ interface GuessLogEntry {
 export interface NameThatTuneState {
   hostId: PlayerId;
   playerIds: PlayerId[];
-  bank: SongDef[]; // the filtered candidate pool for this game (genre/decade applied)
-  songOrder: number[]; // shuffled indices into `bank`
+  pool: SongResult[]; // this game's candidate pool, from a live iTunes search
+  poolOrder: number[]; // shuffled indices into `pool`
   usedIndices: number[];
   roundIndex: number;
   totalRounds: number;
@@ -313,46 +131,30 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
     const host = players.find((p) => p.isHost) ?? players[0]!;
     const genre = String(options.genre ?? "all");
     const decade = String(options.decade ?? "all");
-    const currentDecade = `${Math.floor(new Date().getFullYear() / 10) * 10}s`;
 
-    let bank = HISTORIC_BANK.filter((s) => (genre === "all" || s.genre === genre) && (decade === "all" || s.decade === decade));
+    let pool = await searchSongs(genre, decade);
+    if (pool.length < 3) pool = await searchSongs("all", "all"); // narrow combo came up dry; broaden
+    if (pool.length < 3) throw new Error("Couldn't load any song clips right now. Try again in a bit.");
 
-    // Blend in Apple's live chart when it's relevant to what was asked for —
-    // charts only cover "right now", so skip them if an older decade was
-    // explicitly requested.
-    if (decade === "all" || decade === currentDecade) {
-      const chartSongs = await fetchChartBank(genre, currentDecade);
-      const seen = new Set(bank.map((s) => `${s.title}|${s.artist}`));
-      for (const s of chartSongs) {
-        const key = `${s.title}|${s.artist}`;
-        if (!seen.has(key)) {
-          bank.push(s);
-          seen.add(key);
-        }
-      }
-    }
-
-    if (bank.length < 3) bank = HISTORIC_BANK; // filter too narrow to be playable; fall back to everything
-
-    const songOrder = shuffle(bank.map((_, i) => i));
-    const totalRounds = Math.min(Number(options.rounds) || DEFAULT_ROUNDS, bank.length);
+    const poolOrder = shuffle(pool.map((_, i) => i));
+    const totalRounds = Math.min(Number(options.rounds) || DEFAULT_ROUNDS, pool.length);
     const scores: Record<PlayerId, number> = {};
     for (const p of players) scores[p.id] = 0;
 
-    const first = await pickNextSong(songOrder, [], bank);
+    const first = pickNext(pool, poolOrder, []);
     if (!first) throw new Error("Couldn't load any song clips right now. Try again in a bit.");
 
     return {
       hostId: host.id,
       playerIds: players.map((p) => p.id),
-      bank,
-      songOrder,
+      pool,
+      poolOrder,
       usedIndices: [first.index],
       roundIndex: 0,
       totalRounds,
-      title: first.title,
-      artist: first.artist,
-      previewUrl: first.previewUrl,
+      title: first.song.title,
+      artist: first.song.artist,
+      previewUrl: first.song.previewUrl,
       phase: "guessing",
       guesses: [],
       correctGuessers: [],
@@ -400,18 +202,18 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
       if (nextRoundIndex >= state.totalRounds) {
         return { ...state, phase: "finished" };
       }
-      const next = await pickNextSong(state.songOrder, state.usedIndices, state.bank);
+      const next = pickNext(state.pool, state.poolOrder, state.usedIndices);
       if (!next) {
-        // Ran out of songs that resolve to a playable clip; end the game early.
+        // Ran out of songs in this pool; end the game early.
         return { ...state, phase: "finished" };
       }
       return {
         ...state,
         roundIndex: nextRoundIndex,
         usedIndices: [...state.usedIndices, next.index],
-        title: next.title,
-        artist: next.artist,
-        previewUrl: next.previewUrl,
+        title: next.song.title,
+        artist: next.song.artist,
+        previewUrl: next.song.previewUrl,
         phase: "guessing",
         guesses: [],
         correctGuessers: [],

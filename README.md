@@ -6,7 +6,7 @@ invite link, everyone picks a display name, and you play together in real time.
 ## What's in it
 
 The platform (rooms, invite links, display names, lobby, reconnect) is built so
-new games drop in as self-contained plugins without touching anything else. Eight
+new games drop in as self-contained plugins without touching anything else. Nine
 games are fully implemented:
 
 | Game | Category | Players |
@@ -16,37 +16,49 @@ games are fully implemented:
 | **Family Feud** | 📱 Party | 4–12 |
 | **Doodle Guess** (Pictionary/skribbl-style) | 📱 Party | 3–10 |
 | **Name That Tune** | 📱 Party | 2–12 |
+| **Finish the Lyric** | 📱 Party | 2–12 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
 | **The Game of Life** | 🎲 Board | 2–6 |
 | **Monopoly** | 🎲 Board | 2–6 |
+
+**Sound**: every game that can meaningfully use sound effects has them — card
+plays, buzzers, reveals, shots, wins, and so on. There are no audio files to
+license or download: every effect is synthesized on the fly with the Web Audio
+API (`lib/sound.ts`). A speaker icon in the room header (lobby and in-game) opens
+volume/mute controls, saved per-browser via `localStorage`.
 
 Nothing is on the "coming soon" shelf right now — see
 [Adding a new game](#adding-a-new-game) if you want to keep going.
 
 The host can tune each round-based game before starting it — a **Settings** panel
 appears in the lobby once a game is picked (rounds; Trivia Night also gets
-category/difficulty; Name That Tune gets genre/decade; Tank Arena gets solo-vs-teams
-and match length). Board games (Uno, Life, Monopoly) don't have a settings panel
-since they play to a win condition rather than N rounds.
+category/difficulty; Name That Tune and Finish the Lyric get genre/decade; Tank
+Arena gets solo-vs-teams and match length). Board games (Uno, Life, Monopoly)
+don't have a settings panel since they play to a win condition rather than N
+rounds.
 
 **Freshness**: every trivia/question/song-based game is designed not to repeat
 itself. Trivia Night pulls live from a database of thousands of real questions.
 Family Feud has 100+ original questions and tracks which ones it's already asked,
-across games, for as long as the server keeps running. Name That Tune does the
-same for songs. None of these reset until their pool is exhausted, and even then
+across games, for as long as the server keeps running. Name That Tune and Finish
+the Lyric do the same for songs — and neither of them stores a song list at all
+(see below). None of these reset until their pool is exhausted, and even then
 they only start reusing — they never *guarantee* a repeat within a normal night.
 
 **Known simplifications**, called out here rather than hidden:
 - **Monopoly** has real trading (propose/accept/decline, cash + properties both
   ways), auctions when a purchase is declined, piece selection, a real square
-  board, an animated dice roll, and a fullscreen toggle. Still simplified vs. the
-  physical game: house building doesn't enforce the "even build" rule, and a
-  player going bankrupt doesn't get a grace period to mortgage their way out of it
-  first. The host can also force-end the game at any time — the richest player
-  (cash + property value) wins — since real Monopoly games can run long at a party.
-- **The Game of Life** has piece selection and a real winding board with animated
-  movement. Still simplified: single track (no board forks), no stock/business
-  spaces, no insurance, house values don't fluctuate.
+  board with prices and live rent shown on every tile, an animated dice roll,
+  and a fullscreen toggle. Still simplified vs. the physical game: house
+  building doesn't enforce the "even build" rule, and a player going bankrupt
+  doesn't get a grace period to mortgage their way out of it first. The host
+  can also force-end the game at any time — the richest player (cash +
+  property value) wins — since real Monopoly games can run long at a party.
+- **The Game of Life** has piece selection and a winding road-style board (an
+  SVG path, not a plain grid) with a mountain at the start, a resort glow at
+  retirement, and a real 10-segment spinner wheel. Still simplified: single
+  track (no board forks), no stock/business spaces, no insurance, house values
+  don't fluctuate.
 - **Family Feud**'s face-off is a real buzz-in: first captain to buzz gets the
   first guess, and if they miss it passes to the other captain. Guessing while in
   control rotates through your team in order rather than letting everyone answer
@@ -56,16 +68,23 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
 - **Trivia Night** is powered live by the free, keyless
   [Open Trivia Database](https://opentdb.com) — real questions across categories
   and difficulties, no account or API key needed.
-- **Name That Tune** fetches real 30-second clips live from Apple's free, keyless
-  [iTunes Search API](https://performance-partners.apple.com/search-api) — no
-  account or API key needed. Guessing both the title and artist in one guess earns
-  bonus points. The song *pool* itself blends a small hand-picked bank (needed for
-  older-decade rounds, since charts have no decade metadata) with Apple's live,
-  publicly-published Top 100 chart RSS feeds (overall and per-genre) — the search
-  API can't return "a random song," so something has to supply candidate titles,
-  and the live charts make that pool far bigger and self-refreshing instead of
-  frozen at whatever we hand-typed. See `fetchChartBank` in
-  `lib/games/nameThatTune.ts`.
+- **Name That Tune** and **Finish the Lyric** both pull their song pool from
+  Apple's free, keyless [iTunes Search API](https://performance-partners.apple.com/search-api)
+  — no account or API key, no stored song list at all. When a genre/decade is
+  picked, the server searches iTunes directly with a query like "1980s rock
+  hits"; the *search itself* is the source of "biggest songs of that decade and
+  genre", and the same call returns each hit's real 30-second preview clip, so
+  there's no separate storage or lookup step (see `lib/games/songSource.ts`).
+  This is best-effort, not an exact chart — iTunes has no true decade filter,
+  so relevance comes from the query wording rather than certified chart data;
+  a filter also screens out lullaby/karaoke/tribute-album covers that otherwise
+  rank surprisingly high for generic "hits" searches. Name That Tune has you
+  guess the title/artist (guessing both in one guess earns bonus points);
+  Finish the Lyric fetches the song's real lyrics from the free, keyless
+  [lyrics.ovh](https://lyrics.ovh) API, blanks out one full line, and has you
+  type the missing line — matching is lenient (small typos still count) but
+  the preview clip isn't time-synced to the featured line, so the blank line
+  may not be exactly where the 30-second clip stops.
 - **Tank Arena** is the one real-time game here — everyone else is turn-based.
   WASD to move, aim/shoot with the mouse, solo free-for-all or 2 teams. The server
   runs a physics tick ~20x/second independent of player actions (see
@@ -147,6 +166,10 @@ survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-me
   where the mouse is aiming) as regular actions; the tick loop is what actually
   moves things and resolves hits.
 - **`components/`**: lobby, invite link, chat, and one view component per game.
+- **`lib/sound.ts`**: a tiny synthesized sound-effects engine (Web Audio API
+  oscillators/noise, no audio files) with a shared, `localStorage`-persisted
+  mute/volume setting; `<SoundSettingsButton />` renders the control, and any
+  game view can call `playSound("shoot" | "success" | ...)`.
 - Games can declare `meta.options` (a number or select field, e.g. "Rounds" or
   "Genre") and the lobby renders controls for them automatically
   (`components/GameOptionsPanel.tsx`); the room manager validates/defaults them

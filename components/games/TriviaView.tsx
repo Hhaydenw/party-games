@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { TriviaAction, TriviaView as ViewType } from "@/lib/games/trivia";
 import { PlayerInfo } from "@/lib/types";
+import { playSound } from "@/lib/sound";
 
 const LETTERS = ["A", "B", "C", "D"];
 
@@ -41,6 +42,20 @@ export default function TriviaView({
     return () => clearInterval(interval);
   }, [view.roundEndsAt, isHost, onAction]);
 
+  const revealedPrev = useRef(view.correctIndex !== null);
+  useEffect(() => {
+    const revealed = view.correctIndex !== null;
+    if (revealed && !revealedPrev.current) {
+      playSound(view.yourAnswerIndex !== null && view.yourAnswerIndex === view.correctIndex ? "success" : "reveal");
+    }
+    revealedPrev.current = revealed;
+  }, [view.correctIndex, view.yourAnswerIndex]);
+
+  function answer(i: number) {
+    playSound("select");
+    onAction({ type: "answer", optionIndex: i });
+  }
+
   return (
     <div className="flex flex-col items-center gap-6">
       <div className="text-center">
@@ -64,7 +79,7 @@ export default function TriviaView({
             <button
               key={i}
               disabled={view.yourAnswerIndex !== null || revealed}
-              onClick={() => onAction({ type: "answer", optionIndex: i })}
+              onClick={() => answer(i)}
               className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition disabled:cursor-default ${style}`}
             >
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-bold">{LETTERS[i]}</span>

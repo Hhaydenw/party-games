@@ -7,10 +7,12 @@ import TriviaView from "@/components/games/TriviaView";
 import DrawingView from "@/components/games/DrawingView";
 import FamilyFeudView from "@/components/games/FamilyFeudView";
 import NameThatTuneView from "@/components/games/NameThatTuneView";
+import FinishLyricView from "@/components/games/FinishLyricView";
 import LifeView from "@/components/games/LifeView";
 import MonopolyView from "@/components/games/MonopolyView";
 import TanksView from "@/components/games/TanksView";
 import PlayerList from "@/components/PlayerList";
+import SoundSettingsButton from "@/components/SoundSettingsButton";
 
 export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
   const { gameView, sendAction, error, clearError, returnToLobby } = useParty();
@@ -27,6 +29,7 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
           <span className="text-sm text-slate-400">
             Room <span className="font-semibold tracking-[0.2em] text-gold">{room.code}</span>
           </span>
+          <SoundSettingsButton />
           {me.isHost && (
             <button className="btn-secondary px-3 py-1.5 text-sm" onClick={returnToLobby}>
               End game
@@ -57,6 +60,9 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
           )}
           {gameView.gameId === "name-that-tune" && (
             <NameThatTuneView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
+          )}
+          {gameView.gameId === "finish-the-lyric" && (
+            <FinishLyricView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
           )}
           {gameView.gameId === "life" && <LifeView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}
           {gameView.gameId === "monopoly" && <MonopolyView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}

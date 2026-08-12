@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { UnoAction, UnoCard, UnoColor, UnoView as ViewType } from "@/lib/games/uno";
 import { PlayerInfo } from "@/lib/types";
+import { playSound } from "@/lib/sound";
 
 const COLOR_BG: Record<string, string> = {
   red: "bg-gradient-to-br from-red-500 to-red-700",
@@ -89,6 +90,28 @@ export default function UnoView({
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
   const current = view.order[view.turnIndex];
 
+  const lastDiscardId = useRef(view.discardTop?.id);
+  useEffect(() => {
+    if (view.discardTop?.id !== lastDiscardId.current) {
+      lastDiscardId.current = view.discardTop?.id;
+      playSound("cardPlay");
+    }
+  }, [view.discardTop?.id]);
+
+  const wasMyTurn = useRef(view.yourTurn);
+  useEffect(() => {
+    if (view.yourTurn && !wasMyTurn.current) playSound("turn");
+    wasMyTurn.current = view.yourTurn;
+  }, [view.yourTurn]);
+
+  const announcedWinner = useRef(false);
+  useEffect(() => {
+    if (view.winnerId && !announcedWinner.current) {
+      announcedWinner.current = true;
+      playSound(view.winnerId === meId ? "win" : "reveal");
+    }
+  }, [view.winnerId, meId]);
+
   function handlePlay(card: UnoCard) {
     if (!view.yourTurn) return;
     if (card.color === "wild") {
@@ -126,7 +149,10 @@ export default function UnoView({
           <button
             className="flex flex-col items-center gap-1.5 transition disabled:opacity-40 enabled:hover:-translate-y-1"
             disabled={!view.yourTurn}
-            onClick={() => onAction({ type: "draw" })}
+            onClick={() => {
+              playSound("draw");
+              onAction({ type: "draw" });
+            }}
           >
             <CardBack />
             <span className="text-xs font-medium text-emerald-100/80">{view.drawPileCount} left</span>

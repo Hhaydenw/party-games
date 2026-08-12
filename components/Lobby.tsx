@@ -7,6 +7,7 @@ import InviteLink from "@/components/InviteLink";
 import PlayerList from "@/components/PlayerList";
 import ChatBox from "@/components/ChatBox";
 import GameOptionsPanel from "@/components/GameOptionsPanel";
+import SoundSettingsButton from "@/components/SoundSettingsButton";
 
 const CATEGORY_LABEL: Record<string, string> = { card: "🃏 Card", board: "🎲 Board", party: "📱 Party" };
 
@@ -23,8 +24,11 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 py-10">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="font-display text-3xl font-extrabold">🎉 Party Games</h1>
-        <div className="text-sm text-slate-400">
-          Room <span className="font-semibold tracking-[0.2em] text-gold">{room.code}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-slate-400">
+            Room <span className="font-semibold tracking-[0.2em] text-gold">{room.code}</span>
+          </span>
+          <SoundSettingsButton />
         </div>
       </header>
 
