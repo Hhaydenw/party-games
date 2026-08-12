@@ -10,6 +10,9 @@ import NameThatTuneView from "@/components/games/NameThatTuneView";
 import LifeView from "@/components/games/LifeView";
 import MonopolyView from "@/components/games/MonopolyView";
 import TanksView from "@/components/games/TanksView";
+import PaddleBattleView from "@/components/games/PaddleBattleView";
+import VoidRaidersView from "@/components/games/VoidRaidersView";
+import WildestAnswerView from "@/components/games/WildestAnswerView";
 import PlayerList from "@/components/PlayerList";
 import SoundSettingsButton from "@/components/SoundSettingsButton";
 
@@ -63,6 +66,15 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
           {gameView.gameId === "life" && <LifeView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}
           {gameView.gameId === "monopoly" && <MonopolyView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}
           {gameView.gameId === "tanks" && <TanksView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />}
+          {gameView.gameId === "paddle-battle" && (
+            <PaddleBattleView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
+          )}
+          {gameView.gameId === "void-raiders" && (
+            <VoidRaidersView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
+          )}
+          {gameView.gameId === "wildest-answer" && (
+            <WildestAnswerView view={gameView.view as any} onAction={sendAction} meId={me.id} players={room.players} />
+          )}
         </section>
         <aside className="card-surface h-fit rounded-3xl p-4">
           <h3 className="mb-3 text-sm font-semibold text-slate-300">Players</h3>

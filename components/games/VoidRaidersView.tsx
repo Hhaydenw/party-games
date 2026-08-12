@@ -1,0 +1,194 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import { VoidRaidersAction, VoidRaidersView as ViewType } from "@/lib/games/voidRaiders";
+import { PlayerInfo } from "@/lib/types";
+import { playSound } from "@/lib/sound";
+
+const SHIP_COLORS = ["#22c55e", "#3b82f6", "#f2b705", "#ec4899"];
+
+export default function VoidRaidersView({
+  view,
+  onAction,
+  meId,
+  players,
+}: {
+  view: ViewType;
+  onAction: (action: VoidRaidersAction) => void;
+  meId: string;
+  players: PlayerInfo[];
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const inputState = useRef({ left: false, right: false });
+  const shootInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastSent = useRef("");
+
+  const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
+  const colorFor = (id: string) => SHIP_COLORS[view.ships.findIndex((s) => s.id === id) % SHIP_COLORS.length]!;
+
+  useEffect(() => {
+    function down(e: KeyboardEvent) {
+      const k = e.key.toLowerCase();
+      if (k === "a" || k === "arrowleft") inputState.current.left = true;
+      else if (k === "d" || k === "arrowright") inputState.current.right = true;
+      else if (k === " ") onAction({ type: "shoot" });
+    }
+    function up(e: KeyboardEvent) {
+      const k = e.key.toLowerCase();
+      if (k === "a" || k === "arrowleft") inputState.current.left = false;
+      else if (k === "d" || k === "arrowright") inputState.current.right = false;
+    }
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, [onAction]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const s = inputState.current;
+      const payload = `${s.left}${s.right}`;
+      if (payload !== lastSent.current) {
+        lastSent.current = payload;
+        onAction({ type: "input", left: s.left, right: s.right });
+      }
+    }, 40);
+    return () => clearInterval(interval);
+  }, [onAction]);
+
+  function startShooting() {
+    onAction({ type: "shoot" });
+    if (shootInterval.current) return;
+    shootInterval.current = setInterval(() => onAction({ type: "shoot" }), 110);
+  }
+  function stopShooting() {
+    if (shootInterval.current) {
+      clearInterval(shootInterval.current);
+      shootInterval.current = null;
+    }
+  }
+  useEffect(() => stopShooting, []);
+
+  const prevWave = useRef(view.wave);
+  useEffect(() => {
+    if (view.wave > prevWave.current) playSound("reveal");
+    prevWave.current = view.wave;
+  }, [view.wave]);
+
+  const me = view.ships.find((s) => s.id === meId);
+  const prevMe = useRef(me);
+  useEffect(() => {
+    if (me && prevMe.current) {
+      if (me.lives < prevMe.current.lives) playSound("hit");
+      if (prevMe.current.alive && !me.alive) playSound("explosion");
+      if (me.score > prevMe.current.score) playSound("shoot");
+    }
+    prevMe.current = me;
+  }, [me]);
+
+  const announcedEnd = useRef(false);
+  useEffect(() => {
+    if (view.phase === "finished" && !announcedEnd.current) {
+      announcedEnd.current = true;
+      playSound("win");
+    }
+  }, [view.phase]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const sx = canvas.width / view.arena.width;
+    const sy = canvas.height / view.arena.height;
+
+    ctx.fillStyle = "#05060f";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (const e of view.enemies) {
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.arc(e.x * sx, e.y * sy, view.enemyRadius * sx, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#7f1d1d";
+      ctx.fillRect(e.x * sx - 3, e.y * sy + view.enemyRadius * sy - 2, 6, 4);
+    }
+
+    for (const b of view.bullets) {
+      ctx.fillStyle = b.from === "player" ? "#f2b705" : "#ef4444";
+      ctx.beginPath();
+      ctx.arc(b.x * sx, b.y * sy, Math.max(2, view.bulletRadius * sx), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const s of view.ships) {
+      if (!s.alive) continue;
+      if (s.invulnerable && Math.floor(Date.now() / 100) % 2 === 0) continue; // blink while invulnerable
+      const color = colorFor(s.id);
+      const x = s.x * sx;
+      const y = s.y * sy;
+      const r = view.shipRadius * sx;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x - r, y + r);
+      ctx.lineTo(x + r, y + r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = "10px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(nameFor(s.id), x, y + r + 14);
+    }
+  }, [view, meId]);
+
+  const remainingSec = Math.max(0, Math.ceil((view.matchEndsAt - Date.now()) / 1000));
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-400">
+          ⏱ {Math.floor(remainingSec / 60)}:{String(remainingSec % 60).padStart(2, "0")} · Wave {view.wave}
+        </p>
+        {view.phase === "finished" && <p className="font-bold text-gold">🏆 Match over!</p>}
+      </div>
+
+      <div className="relative mx-auto w-full max-w-2xl">
+        <canvas
+          ref={canvasRef}
+          width={900}
+          height={650}
+          className="w-full select-none rounded-2xl border border-white/10"
+          style={{ aspectRatio: "900 / 650", cursor: "crosshair" }}
+          onMouseDown={startShooting}
+          onMouseUp={stopShooting}
+          onMouseLeave={stopShooting}
+        />
+        {me && !me.alive && view.phase === "playing" && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/60">
+            <p className="text-xl font-bold text-accent">💥 Your ship was destroyed!</p>
+          </div>
+        )}
+      </div>
+      <p className="text-center text-xs text-slate-500">A/D or ←/→ to move · space or click/hold to fire</p>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        {[...view.ships]
+          .sort((a, b) => b.score - a.score)
+          .map((s) => (
+            <div key={s.id} className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm">
+              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: colorFor(s.id) }} />
+              <span>{nameFor(s.id)}</span>
+              <span className="ml-auto text-xs text-slate-400">
+                {s.score} pts · {"❤️".repeat(Math.max(0, s.lives))}
+                {s.lives === 0 && "💀"}
+              </span>
+            </div>
+          ))}
+      </div>
+
+      {view.phase === "finished" && <p className="text-center text-sm text-slate-400">Match over — head back to the lobby to play again.</p>}
+    </div>
+  );
+}

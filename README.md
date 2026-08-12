@@ -6,8 +6,8 @@ invite link, everyone picks a display name, and you play together in real time.
 ## What's in it
 
 The platform (rooms, invite links, display names, lobby, reconnect) is built so
-new games drop in as self-contained plugins without touching anything else. Eight
-games are fully implemented:
+new games drop in as self-contained plugins without touching anything else.
+Eleven games are fully implemented:
 
 | Game | Category | Players |
 |---|---|---|
@@ -16,7 +16,10 @@ games are fully implemented:
 | **Family Feud** | 📱 Party | 4–12 |
 | **Doodle Guess** (Pictionary/skribbl-style) | 📱 Party | 3–10 |
 | **Name That Tune** | 📱 Party | 2–12 |
+| **Wildest Answer** (Quiplash-style prompt/vote) | 📱 Party | 4–8 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
+| **Paddle Battle** (Pong-style) | 📱 Party (real-time) | 2 |
+| **Void Raiders** (Galaga/Space Invaders-style) | 📱 Party (real-time) | 1–4 |
 | **The Game of Life** | 🎲 Board | 2–6 |
 | **Monopoly** | 🎲 Board | 2–6 |
 
@@ -31,9 +34,10 @@ Nothing is on the "coming soon" shelf right now — see
 
 The host can tune each round-based game before starting it — a **Settings** panel
 appears in the lobby once a game is picked (rounds; Trivia Night also gets
-category/difficulty; Name That Tune gets genre/decade; Tank Arena gets
-solo-vs-teams and match length). Board games (Uno, Life, Monopoly) don't have a
-settings panel since they play to a win condition rather than N rounds.
+category/difficulty; Name That Tune gets genre/decade; Tank Arena and Void
+Raiders get match length, Tank Arena also gets solo-vs-teams; Paddle Battle gets
+the winning score). Board games (Uno, Life, Monopoly) don't have a settings
+panel since they play to a win condition rather than N rounds.
 
 **Freshness**: every trivia/question/song-based game is designed not to repeat
 itself. Trivia Night pulls live from a database of thousands of real questions.
@@ -78,10 +82,27 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   a filter also screens out lullaby/karaoke/tribute-album covers that otherwise
   rank surprisingly high for generic "hits" searches. Guess the title/artist —
   guessing both in one guess earns bonus points.
-- **Tank Arena** is the one real-time game here — everyone else is turn-based.
-  WASD to move, aim/shoot with the mouse, solo free-for-all or 2 teams. The server
-  runs a physics tick ~20x/second independent of player actions (see
-  [How it's built](#how-its-built)) rather than reacting only to discrete moves.
+- **Tank Arena**, **Paddle Battle**, and **Void Raiders** are the real-time
+  games here — everyone else is turn-based. All three run on the server's
+  physics tick loop (see [How it's built](#how-its-built)) rather than
+  reacting only to discrete moves. Tank Arena: WASD to move, aim/shoot with
+  the mouse, solo free-for-all or 2 teams. Paddle Battle: a two-player
+  Pong-style paddle-and-ball game, W/S or ↑/↓ to move, first to the target
+  score wins — ball speed ramps up with each rally and the bounce angle
+  depends on where it hits your paddle. Void Raiders: a Galaga/Space
+  Invaders-style shooter, A/D or ←/→ to move, space or click/hold to fire at
+  a descending enemy formation that gets tougher each wave — solo or
+  co-op/competitive up to 4 players sharing one arena, highest score when
+  time's up (or everyone's ships are destroyed) wins.
+- **Wildest Answer** is an original Quiplash-style prompt-and-vote game (the
+  prompts are written fresh for this app, not pulled from any commercial
+  game — same approach as Family Feud's question bank). Each round, players
+  are randomly paired up (a group of 3 if the player count is odd) and each
+  pair gets a shared silly prompt to answer separately and privately;
+  everyone *not* in that pair then votes anonymously on which answer is
+  funnier. Points come from votes received plus a bonus for winning your
+  group outright. Needs at least 4 players so every group always has
+  someone outside it left to vote.
 
 ### Family Feud content note
 
@@ -154,10 +175,10 @@ survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-me
 - **Real-time games**: a game can optionally implement `tick(state, dtMs)` and set
   `meta.tickIntervalMs`; `lib/rooms.ts` then runs that game's physics step on a
   timer (independent of player actions) and broadcasts whenever it changes state.
-  Tank Arena is the only game using this so far — everything else reacts only to
-  discrete player actions. Players stream continuous state (which keys are held,
-  where the mouse is aiming) as regular actions; the tick loop is what actually
-  moves things and resolves hits.
+  Tank Arena, Paddle Battle, and Void Raiders all use this — everything else
+  reacts only to discrete player actions. Players stream continuous state
+  (which keys are held, where the mouse is aiming) as regular actions; the
+  tick loop is what actually moves things and resolves hits.
 - **`components/`**: lobby, invite link, chat, and one view component per game.
 - **`lib/sound.ts`**: a tiny synthesized sound-effects engine (Web Audio API
   oscillators/noise, no audio files) with a shared, `localStorage`-persisted
