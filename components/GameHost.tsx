@@ -15,7 +15,7 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-6 py-8">
+    <main className="mx-auto flex min-h-screen w-full max-w-[1920px] flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-2xl font-extrabold">🎉 Party Games</h1>
         <div className="flex items-center gap-3">
@@ -38,11 +38,11 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
-        <section className="card-surface rounded-3xl p-6">
+      <div className="grid flex-1 gap-5 xl:grid-cols-[1fr_280px]">
+        <section className="card-surface min-w-0 rounded-3xl p-4 sm:p-6">
           <GameView gameId={gameView.gameId} view={gameView.view} onAction={sendAction} meId={me.id} players={room.players} />
         </section>
-        <aside className="card-surface h-fit rounded-3xl p-4">
+        <aside className="card-surface h-fit rounded-3xl p-4 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
           <h3 className="mb-3 text-sm font-semibold text-slate-300">Players</h3>
           <PlayerList players={room.players} meId={me.id} />
         </aside>

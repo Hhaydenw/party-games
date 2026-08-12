@@ -215,7 +215,7 @@ export default function VoidRaidersView({
         {view.phase === "finished" && <p className="font-bold text-gold">🏆 Match over!</p>}
       </div>
 
-      <div className="relative mx-auto w-full max-w-2xl">
+      <div className="relative mx-auto w-full max-w-4xl">
         <canvas
           ref={canvasRef}
           width={900}

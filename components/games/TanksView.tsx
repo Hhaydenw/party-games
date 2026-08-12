@@ -175,7 +175,7 @@ export default function TanksView({
         {view.phase === "finished" && <p className="font-bold text-gold">🏆 Match over!</p>}
       </div>
 
-      <div className="relative mx-auto w-full max-w-3xl">
+      <div className="relative mx-auto w-full max-w-5xl">
         <canvas
           ref={canvasRef}
           width={1000}

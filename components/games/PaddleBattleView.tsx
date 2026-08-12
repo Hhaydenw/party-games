@@ -130,7 +130,7 @@ export default function PaddleBattleView({
             : `You (${me!.side}) vs ${nameFor(opponent!.id)}`}
       </p>
 
-      <div className="relative mx-auto w-full max-w-2xl">
+      <div className="relative mx-auto w-full max-w-3xl">
         <canvas
           ref={canvasRef}
           width={800}

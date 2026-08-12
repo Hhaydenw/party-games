@@ -54,7 +54,7 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
     : room.gameId === "family-feud" || (room.gameId === "tanks" && room.gameOptions.mode === "teams");
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 py-10">
+    <main className="mx-auto flex min-h-screen w-full max-w-[1800px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="font-display text-3xl font-extrabold">🎉 Party Games</h1>
         <div className="flex items-center gap-3">
@@ -66,8 +66,8 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
         </div>
       </header>
 
-      <div className="grid gap-6 md:grid-cols-[1fr_320px]">
-        <section className="card-surface rounded-3xl p-6">
+      <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
+        <section className="card-surface min-w-0 rounded-3xl p-4 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">{seriesMode ? "Build a series" : "Choose a game"}</h2>
             {me.isHost && (
@@ -96,7 +96,7 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
             </p>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {games.map((g) => {
               const queuedIndex = displayedQueue.indexOf(g.id);
               const isQueued = queuedIndex !== -1;
@@ -182,7 +182,7 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
           {showTeamPicker && (
             <div className="mt-6 rounded-2xl bg-white/5 p-4">
               <h3 className="mb-3 text-sm font-semibold text-slate-300">Choose teams</h3>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {(["1", "2"] as const).map((team) => {
                   const isRed = team === "1";
                   const members = room.players.filter((p) => room.teamAssignments[p.id] === team);
@@ -221,7 +221,7 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
           )}
         </section>
 
-        <aside className="flex flex-col gap-4">
+        <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
           <InviteLink code={room.code} />
           <div className="card-surface rounded-3xl p-4">
             <h3 className="mb-3 text-sm font-semibold text-slate-300">Players ({room.players.length})</h3>

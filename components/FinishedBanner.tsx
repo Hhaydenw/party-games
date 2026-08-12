@@ -20,7 +20,7 @@ export default function FinishedBanner({ room, me }: { room: RoomSummary; me: Pl
   const nameFor = (id: string) => (id === me.id ? "You" : room.players.find((p) => p.id === id)?.name ?? "…");
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-4xl flex-col items-center gap-6 px-6 py-12 text-center">
+    <main className="mx-auto flex min-h-screen w-full max-w-[1800px] flex-col items-center gap-6 px-4 py-10 text-center sm:px-6 lg:px-8 lg:py-12">
       <div>
         <p className="text-sm uppercase tracking-widest text-slate-500">
           {inSeries ? `Game ${room.seriesIndex + 1} of ${room.seriesQueue.length} — series` : "Game over"}

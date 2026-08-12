@@ -36,16 +36,39 @@ function money(n: number) {
 }
 
 // Lays the 40 tiles out on the real square Monopoly perimeter (11x11 grid),
-// GO in the bottom-right corner, running counter-clockwise.
+// GO in the upper-left corner, running counter-clockwise (Jail upper-right,
+// Free Parking lower-right, Go To Jail lower-left). Computed as a 180°
+// rotation of the straightforward "GO bottom-right" layout, which keeps the
+// perimeter ordering/adjacency correct without re-deriving it by hand.
 function tileGridPos(index: number): { row: number; col: number } {
-  if (index === 0) return { row: 10, col: 10 };
-  if (index <= 9) return { row: 10, col: 10 - index };
-  if (index === 10) return { row: 10, col: 0 };
-  if (index <= 19) return { row: 10 - (index - 10), col: 0 };
-  if (index === 20) return { row: 0, col: 0 };
-  if (index <= 29) return { row: 0, col: index - 20 };
-  if (index === 30) return { row: 0, col: 10 };
-  return { row: index - 30, col: 10 };
+  let row: number;
+  let col: number;
+  if (index === 0) {
+    row = 10;
+    col = 10;
+  } else if (index <= 9) {
+    row = 10;
+    col = 10 - index;
+  } else if (index === 10) {
+    row = 10;
+    col = 0;
+  } else if (index <= 19) {
+    row = 10 - (index - 10);
+    col = 0;
+  } else if (index === 20) {
+    row = 0;
+    col = 0;
+  } else if (index <= 29) {
+    row = 0;
+    col = index - 20;
+  } else if (index === 30) {
+    row = 0;
+    col = 10;
+  } else {
+    row = index - 30;
+    col = 10;
+  }
+  return { row: 10 - row, col: 10 - col };
 }
 
 function Dice({ rolling, lastRoll }: { rolling: boolean; lastRoll: [number, number] | null }) {
@@ -234,211 +257,227 @@ export default function MonopolyView({
         </div>
       )}
 
-      {/* Board: real 11x11 square perimeter layout, sized up so prices/rent are legible */}
-      <div
-        className="relative mx-auto aspect-square w-full max-w-[900px] rounded-2xl border-4 border-emerald-900 p-2 shadow-[0_10px_40px_rgba(0,0,0,0.5)]"
-        style={{ background: "radial-gradient(circle at 50% 50%, #0d5c3f 0%, #073b28 100%)" }}
-      >
-        {view.board.map((tile, i) => {
-          const { row, col } = tileGridPos(i);
-          const prop = view.properties[i]!;
-          const occupants = view.players.filter((p) => p.position === i && !p.bankrupt);
-          const isCorner = i === 0 || i === 10 || i === 20 || i === 30;
-          const isOwnable = tile.price !== undefined;
-          return (
-            <div
-              key={i}
-              className={`absolute flex flex-col items-center justify-center gap-0.5 overflow-hidden border border-black/30 p-0.5 text-center leading-tight ${
-                isCorner ? "z-10 bg-slate-100 text-[7px] font-bold text-ink sm:text-[9px]" : "bg-slate-50 text-[6px] text-ink sm:text-[7.5px]"
-              }`}
-              style={{ left: `${(col / 11) * 100}%`, top: `${(row / 11) * 100}%`, width: `${100 / 11}%`, height: `${100 / 11}%` }}
-              title={tile.name}
-            >
-              {tile.color && <span className="h-1.5 w-full shrink-0 sm:h-2.5" style={{ backgroundColor: COLOR_SWATCH[tile.color] }} />}
-              {isCorner ? (
-                <span className="text-base sm:text-2xl">{nonPropertyIcon(tile.type, tile.name)}</span>
-              ) : (
-                <span className="text-xs sm:text-base">{nonPropertyIcon(tile.type, tile.name)}</span>
-              )}
-              <span className="line-clamp-2 font-semibold text-ink/90">{tile.name}</span>
-              {isOwnable && !prop.ownerId && <span className="font-bold text-emerald-700">{money(tile.price!)}</span>}
-              {prop.ownerId && (
-                <span className="flex flex-col items-center gap-0.5">
-                  <span className="flex items-center gap-0.5">
-                    <span className="h-1.5 w-1.5 rounded-full sm:h-2 sm:w-2" style={{ backgroundColor: colorFor(prop.ownerId) }} />
-                    {prop.mortgaged && <span className="font-bold text-accent">Mortgaged</span>}
-                  </span>
-                  {!prop.mortgaged && prop.currentRent !== null && (
-                    <span className="font-bold text-accent">Rent {money(prop.currentRent)}</span>
-                  )}
-                  {prop.houses > 0 && <span>{prop.houses === 5 ? "🏨" : "🏠".repeat(prop.houses)}</span>}
-                </span>
-              )}
-              {occupants.length > 0 && (
-                <div className="absolute -bottom-1 flex flex-wrap justify-center gap-0.5">
-                  {occupants.map((p) => (
-                    <span key={p.id} className="text-sm transition-all duration-500 sm:text-lg" style={{ filter: `drop-shadow(0 0 2px ${colorFor(p.id)})` }}>
-                      {p.piece}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 select-none text-4xl font-black tracking-widest text-emerald-100/10 sm:text-6xl">
-          MONOPOLY
-        </div>
-      </div>
-
-      {/* Players */}
-      <div className="grid gap-3 sm:grid-cols-2">
-        {view.players.map((p) => (
-          <div key={p.id} className={`card-surface rounded-2xl p-3 ${p.bankrupt ? "opacity-40" : ""}`}>
-            <div className="mb-1 flex items-center gap-2">
-              <span className="text-lg">{p.piece}</span>
-              <span className="h-3 w-3 rounded-full" style={{ backgroundColor: colorFor(p.id) }} />
-              <p className="font-semibold">{nameFor(p.id)}</p>
-              {p.bankrupt && <span className="ml-auto text-xs text-accent">bankrupt</span>}
-              {p.inJail && !p.bankrupt && <span className="ml-auto text-xs text-slate-400">🔒 in jail</span>}
-            </div>
-            <p className="text-xs text-slate-400">
-              Cash: {money(p.cash)} · Properties: {p.propertyCount}
-              {p.jailCards > 0 && ` · 🎟️ ${p.jailCards}`}
-            </p>
-            <p className="text-sm font-bold text-gold">Net worth: {money(p.netWorth)}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Auction */}
-      {view.phase === "auction" && view.auction && (
-        <div className="flex flex-col items-center gap-3 rounded-2xl bg-gold/10 p-5">
-          <p className="font-semibold">
-            🔨 Auction: {view.board[view.auction.propertyIndex]!.name} (list price {money(view.board[view.auction.propertyIndex]!.price ?? 0)})
-          </p>
-          <p className="text-sm text-slate-300">
-            High bid: <span className="font-bold text-gold">{money(view.auction.highBid)}</span>
-            {view.auction.highBidderId && ` by ${nameFor(view.auction.highBidderId)}`}
-          </p>
-          <p className="text-xs text-slate-400">Still bidding: {view.auction.activeBidders.map(nameFor).join(", ")}</p>
-          {view.auction.currentBidderId === meId ? (
-            <AuctionBidForm view={view} onAction={onAction} me={me} />
-          ) : (
-            <p className="text-sm text-slate-400">Waiting on {nameFor(view.auction.currentBidderId)}…</p>
-          )}
-        </div>
-      )}
-
-      {/* Turn actions */}
-      {view.yourTurn && view.phase !== "finished" && view.phase !== "auction" && (
-        <div className="flex flex-col items-center gap-3 rounded-2xl bg-white/5 p-5">
-          {view.phase === "awaitingRoll" && me.inJail && (
-            <div className="flex flex-wrap justify-center gap-2">
-              <p className="w-full text-center text-sm text-slate-400">You're in jail.</p>
-              <Dice rolling={rolling} lastRoll={view.lastRoll} />
-              <button className="btn-primary" onClick={handleRoll}>
-                Roll for doubles
-              </button>
-              <button className="btn-secondary" onClick={() => onAction({ type: "payBail" })}>
-                Pay $50 bail
-              </button>
-              {me.jailCards > 0 && (
-                <button className="btn-secondary" onClick={() => onAction({ type: "useJailCard" })}>
-                  Use Get Out of Jail Free
-                </button>
-              )}
-            </div>
-          )}
-
-          {view.phase === "awaitingRoll" && !me.inJail && (
-            <div className="flex flex-col items-center gap-3">
-              <Dice rolling={rolling} lastRoll={view.lastRoll} />
-              <button className="btn-primary text-lg" onClick={handleRoll} disabled={rolling}>
-                🎲 Roll dice
-              </button>
-            </div>
-          )}
-
-          {view.phase === "awaitingPropertyDecision" && pendingTile && (
-            <div className="flex flex-col items-center gap-2">
-              <p>
-                Buy <span className="font-semibold">{pendingTile.name}</span> for {money(pendingTile.price ?? 0)}?
-              </p>
-              <div className="flex gap-2">
-                <button
-                  className="btn-primary"
-                  onClick={() => {
-                    playSound("success");
-                    onAction({ type: "buyProperty" });
-                  }}
-                  disabled={me.cash < (pendingTile.price ?? 0)}
+      {/* Board on the left, players + the current turn's actions in a sticky
+          rail on the right — so rolling/buying/ending your turn never
+          requires scrolling past the board to reach it. */}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
+        <div className="flex min-w-0 flex-col gap-5">
+          {/* Board: real 11x11 square perimeter layout, sized up so prices/rent are legible */}
+          <div
+            className="relative mx-auto aspect-square w-full max-w-[1100px] rounded-2xl border-4 border-emerald-900 p-2 shadow-[0_10px_40px_rgba(0,0,0,0.5)]"
+            style={{ background: "radial-gradient(circle at 50% 50%, #0d5c3f 0%, #073b28 100%)" }}
+          >
+            {view.board.map((tile, i) => {
+              const { row, col } = tileGridPos(i);
+              const prop = view.properties[i]!;
+              const occupants = view.players.filter((p) => p.position === i && !p.bankrupt);
+              const isCorner = i === 0 || i === 10 || i === 20 || i === 30;
+              const isOwnable = tile.price !== undefined;
+              return (
+                <div
+                  key={i}
+                  className={`absolute flex flex-col items-center justify-center gap-0.5 overflow-hidden border border-black/30 p-0.5 text-center leading-tight ${
+                    isCorner ? "z-10 bg-slate-100 text-[7px] font-bold text-ink sm:text-[9px]" : "bg-slate-50 text-[6px] text-ink sm:text-[7.5px]"
+                  }`}
+                  style={{ left: `${(col / 11) * 100}%`, top: `${(row / 11) * 100}%`, width: `${100 / 11}%`, height: `${100 / 11}%` }}
+                  title={tile.name}
                 >
-                  Buy
-                </button>
-                <button className="btn-secondary" onClick={() => onAction({ type: "declineProperty" })}>
-                  Pass to auction
-                </button>
+                  {tile.color && <span className="h-1.5 w-full shrink-0 sm:h-2.5" style={{ backgroundColor: COLOR_SWATCH[tile.color] }} />}
+                  {isCorner ? (
+                    <span className="text-base sm:text-2xl">{nonPropertyIcon(tile.type, tile.name)}</span>
+                  ) : (
+                    <span className="text-xs sm:text-base">{nonPropertyIcon(tile.type, tile.name)}</span>
+                  )}
+                  <span className="line-clamp-2 font-semibold text-ink/90">{tile.name}</span>
+                  {isOwnable && !prop.ownerId && <span className="font-bold text-emerald-700">{money(tile.price!)}</span>}
+                  {prop.ownerId && (
+                    <span className="flex flex-col items-center gap-0.5">
+                      <span className="flex items-center gap-0.5">
+                        <span className="h-1.5 w-1.5 rounded-full sm:h-2 sm:w-2" style={{ backgroundColor: colorFor(prop.ownerId) }} />
+                        {prop.mortgaged && <span className="font-bold text-accent">Mortgaged</span>}
+                      </span>
+                      {!prop.mortgaged && prop.currentRent !== null && (
+                        <span className="font-bold text-accent">Rent {money(prop.currentRent)}</span>
+                      )}
+                      {prop.houses > 0 && <span>{prop.houses === 5 ? "🏨" : "🏠".repeat(prop.houses)}</span>}
+                    </span>
+                  )}
+                  {occupants.length > 0 && (
+                    <div className="absolute -bottom-1 flex flex-wrap justify-center gap-0.5">
+                      {occupants.map((p) => (
+                        <span key={p.id} className="text-sm transition-all duration-500 sm:text-lg" style={{ filter: `drop-shadow(0 0 2px ${colorFor(p.id)})` }}>
+                          {p.piece}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 select-none text-4xl font-black tracking-widest text-emerald-100/10 sm:text-6xl">
+              MONOPOLY
+            </div>
+          </div>
+
+          {/* Property management */}
+          {view.yourTurn && (view.phase === "awaitingTurnEnd" || view.phase === "awaitingRoll") && myProperties.length > 0 && (
+            <div className="rounded-2xl bg-white/5 p-4">
+              <h3 className="mb-2 text-sm font-semibold text-slate-300">Manage your properties</h3>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {myProperties.map((p) => {
+                  const tile = view.board[p.index]!;
+                  return (
+                    <div key={p.index} className="flex items-center justify-between gap-2 rounded-lg bg-black/20 px-3 py-1.5 text-xs">
+                      <span className="truncate">
+                        {tile.name} {p.mortgaged && <span className="text-accent">(mortgaged)</span>}
+                        {p.houses > 0 && ` · ${p.houses === 5 ? "hotel" : `${p.houses} house${p.houses > 1 ? "s" : ""}`}`}
+                      </span>
+                      <div className="flex shrink-0 gap-1">
+                        {tile.type === "property" && !p.mortgaged && (
+                          <>
+                            <button className="btn-secondary px-2 py-1 text-[11px]" onClick={() => onAction({ type: "buildHouse", propertyIndex: p.index })}>
+                              Build
+                            </button>
+                            {p.houses > 0 && (
+                              <button className="btn-secondary px-2 py-1 text-[11px]" onClick={() => onAction({ type: "sellHouse", propertyIndex: p.index })}>
+                                Sell house
+                              </button>
+                            )}
+                          </>
+                        )}
+                        {!p.mortgaged && p.houses === 0 && (
+                          <button className="btn-secondary px-2 py-1 text-[11px]" onClick={() => onAction({ type: "mortgageProperty", propertyIndex: p.index })}>
+                            Mortgage
+                          </button>
+                        )}
+                        {p.mortgaged && (
+                          <button className="btn-secondary px-2 py-1 text-[11px]" onClick={() => onAction({ type: "unmortgageProperty", propertyIndex: p.index })}>
+                            Unmortgage
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {view.phase === "awaitingTurnEnd" && (
-            <button className="btn-primary" onClick={() => onAction({ type: "endTurn" })}>
-              End turn
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Property management */}
-      {view.yourTurn && (view.phase === "awaitingTurnEnd" || view.phase === "awaitingRoll") && myProperties.length > 0 && (
-        <div className="rounded-2xl bg-white/5 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-slate-300">Manage your properties</h3>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {myProperties.map((p) => {
-              const tile = view.board[p.index]!;
-              return (
-                <div key={p.index} className="flex items-center justify-between gap-2 rounded-lg bg-black/20 px-3 py-1.5 text-xs">
-                  <span className="truncate">
-                    {tile.name} {p.mortgaged && <span className="text-accent">(mortgaged)</span>}
-                    {p.houses > 0 && ` · ${p.houses === 5 ? "hotel" : `${p.houses} house${p.houses > 1 ? "s" : ""}`}`}
-                  </span>
-                  <div className="flex shrink-0 gap-1">
-                    {tile.type === "property" && !p.mortgaged && (
-                      <>
-                        <button className="btn-secondary px-2 py-1 text-[11px]" onClick={() => onAction({ type: "buildHouse", propertyIndex: p.index })}>
-                          Build
-                        </button>
-                        {p.houses > 0 && (
-                          <button className="btn-secondary px-2 py-1 text-[11px]" onClick={() => onAction({ type: "sellHouse", propertyIndex: p.index })}>
-                            Sell house
-                          </button>
-                        )}
-                      </>
-                    )}
-                    {!p.mortgaged && p.houses === 0 && (
-                      <button className="btn-secondary px-2 py-1 text-[11px]" onClick={() => onAction({ type: "mortgageProperty", propertyIndex: p.index })}>
-                        Mortgage
-                      </button>
-                    )}
-                    {p.mortgaged && (
-                      <button className="btn-secondary px-2 py-1 text-[11px]" onClick={() => onAction({ type: "unmortgageProperty", propertyIndex: p.index })}>
-                        Unmortgage
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="rounded-xl bg-black/20 p-3 text-xs text-slate-400 xl:hidden">
+            {view.log.map((line, i) => (
+              <p key={i}>{line}</p>
+            ))}
           </div>
         </div>
-      )}
 
-      <div className="rounded-xl bg-black/20 p-3 text-xs text-slate-400">
-        {view.log.map((line, i) => (
-          <p key={i}>{line}</p>
-        ))}
+        {/* Sticky rail: players, auction, and — the important part — the
+            current turn's actions (roll/buy/end turn), always in view. */}
+        <aside className="flex flex-col gap-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+          <div className="grid gap-3">
+            {view.players.map((p) => (
+              <div key={p.id} className={`card-surface rounded-2xl p-3 ${p.bankrupt ? "opacity-40" : ""}`}>
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-lg">{p.piece}</span>
+                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: colorFor(p.id) }} />
+                  <p className="font-semibold">{nameFor(p.id)}</p>
+                  {p.bankrupt && <span className="ml-auto text-xs text-accent">bankrupt</span>}
+                  {p.inJail && !p.bankrupt && <span className="ml-auto text-xs text-slate-400">🔒 in jail</span>}
+                </div>
+                <p className="text-xs text-slate-400">
+                  Cash: {money(p.cash)} · Properties: {p.propertyCount}
+                  {p.jailCards > 0 && ` · 🎟️ ${p.jailCards}`}
+                </p>
+                <p className="text-sm font-bold text-gold">Net worth: {money(p.netWorth)}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Auction */}
+          {view.phase === "auction" && view.auction && (
+            <div className="flex flex-col items-center gap-3 rounded-2xl bg-gold/10 p-5">
+              <p className="text-center font-semibold">
+                🔨 Auction: {view.board[view.auction.propertyIndex]!.name} (list price {money(view.board[view.auction.propertyIndex]!.price ?? 0)})
+              </p>
+              <p className="text-sm text-slate-300">
+                High bid: <span className="font-bold text-gold">{money(view.auction.highBid)}</span>
+                {view.auction.highBidderId && ` by ${nameFor(view.auction.highBidderId)}`}
+              </p>
+              <p className="text-center text-xs text-slate-400">Still bidding: {view.auction.activeBidders.map(nameFor).join(", ")}</p>
+              {view.auction.currentBidderId === meId ? (
+                <AuctionBidForm view={view} onAction={onAction} me={me} />
+              ) : (
+                <p className="text-sm text-slate-400">Waiting on {nameFor(view.auction.currentBidderId)}…</p>
+              )}
+            </div>
+          )}
+
+          {/* Turn actions */}
+          {view.yourTurn && view.phase !== "finished" && view.phase !== "auction" && (
+            <div className="flex flex-col items-center gap-3 rounded-2xl bg-white/5 p-5">
+              {view.phase === "awaitingRoll" && me.inJail && (
+                <div className="flex flex-wrap justify-center gap-2">
+                  <p className="w-full text-center text-sm text-slate-400">You're in jail.</p>
+                  <Dice rolling={rolling} lastRoll={view.lastRoll} />
+                  <button className="btn-primary" onClick={handleRoll}>
+                    Roll for doubles
+                  </button>
+                  <button className="btn-secondary" onClick={() => onAction({ type: "payBail" })}>
+                    Pay $50 bail
+                  </button>
+                  {me.jailCards > 0 && (
+                    <button className="btn-secondary" onClick={() => onAction({ type: "useJailCard" })}>
+                      Use Get Out of Jail Free
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {view.phase === "awaitingRoll" && !me.inJail && (
+                <div className="flex flex-col items-center gap-3">
+                  <Dice rolling={rolling} lastRoll={view.lastRoll} />
+                  <button className="btn-primary text-lg" onClick={handleRoll} disabled={rolling}>
+                    🎲 Roll dice
+                  </button>
+                </div>
+              )}
+
+              {view.phase === "awaitingPropertyDecision" && pendingTile && (
+                <div className="flex flex-col items-center gap-2">
+                  <p className="text-center">
+                    Buy <span className="font-semibold">{pendingTile.name}</span> for {money(pendingTile.price ?? 0)}?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      className="btn-primary"
+                      onClick={() => {
+                        playSound("success");
+                        onAction({ type: "buyProperty" });
+                      }}
+                      disabled={me.cash < (pendingTile.price ?? 0)}
+                    >
+                      Buy
+                    </button>
+                    <button className="btn-secondary" onClick={() => onAction({ type: "declineProperty" })}>
+                      Pass to auction
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {view.phase === "awaitingTurnEnd" && (
+                <button className="btn-primary" onClick={() => onAction({ type: "endTurn" })}>
+                  End turn
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="hidden rounded-xl bg-black/20 p-3 text-xs text-slate-400 xl:block">
+            {view.log.map((line, i) => (
+              <p key={i}>{line}</p>
+            ))}
+          </div>
+        </aside>
       </div>
     </div>
   );

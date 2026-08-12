@@ -63,6 +63,13 @@ screen the moment you send one, the same idea as Google Meet's in-call
 reactions. Nothing's saved or logged anywhere; it's purely a live, ephemeral
 broadcast to whoever's currently in the room.
 
+**Layout**: the lobby and in-game screens use the full width of the browser
+window (up to a generous cap on very wide monitors) instead of a narrow
+centered column, with the player list/settings/action rail sticky alongside
+the main content instead of stacked below it — so on a normal desktop window
+you're not scrolling past a small centered board to reach the controls. It
+still collapses to a single stacked column on narrower/mobile screens.
+
 **Sound**: every game that can meaningfully use sound effects has them — card
 plays, buzzers, reveals, shots, wins, and so on. There are no audio files to
 license or download: every effect is synthesized on the fly with the Web Audio
@@ -98,12 +105,15 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
 **Known simplifications**, called out here rather than hidden:
 - **Monopoly** has real trading (propose/accept/decline, cash + properties both
   ways), auctions when a purchase is declined, piece selection, a real square
-  board with prices and live rent shown on every tile, an animated dice roll,
-  and a fullscreen toggle. Still simplified vs. the physical game: house
-  building doesn't enforce the "even build" rule, and a player going bankrupt
-  doesn't get a grace period to mortgage their way out of it first. The host
-  can also force-end the game at any time — the richest player (cash +
-  property value) wins — since real Monopoly games can run long at a party.
+  board with prices and live rent shown on every tile (GO in the upper-left
+  corner), an animated dice roll, and a fullscreen toggle. The board sits in
+  its own column with players/roll-or-buy/auction/turn-log in a sticky rail
+  next to it, so rolling and buying never requires scrolling past the board
+  to reach the button. Still simplified vs. the physical game: house building
+  doesn't enforce the "even build" rule, and a player going bankrupt doesn't
+  get a grace period to mortgage their way out of it first. The host can also
+  force-end the game at any time — the richest player (cash + property
+  value) wins — since real Monopoly games can run long at a party.
 - **The Game of Life** has piece selection and a winding road-style board (an
   SVG path, not a plain grid) with a mountain at the start, a resort glow at
   retirement, and a real 10-segment spinner wheel. Still simplified: single

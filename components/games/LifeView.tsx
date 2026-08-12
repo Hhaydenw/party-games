@@ -196,7 +196,7 @@ export default function LifeView({
 
       {/* Winding board, like the real LIFE track — wide and horizontally scrollable */}
       <div
-        className="mx-auto w-full max-w-4xl overflow-x-auto overflow-y-hidden rounded-2xl border-4 border-emerald-900/60 p-2 shadow-inner"
+        className="mx-auto w-full max-w-6xl overflow-x-auto overflow-y-hidden rounded-2xl border-4 border-emerald-900/60 p-2 shadow-inner"
         style={{ background: "linear-gradient(160deg, #163a26 0%, #0c2417 100%)" }}
       >
         <svg width={BOARD_W} height={BOARD_H} viewBox={`0 0 ${BOARD_W} ${BOARD_H}`} className="block">
