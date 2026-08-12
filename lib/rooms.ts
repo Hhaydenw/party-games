@@ -43,6 +43,8 @@ interface InternalRoom {
   seriesActive: boolean;
   seriesIndex: number;
   seriesPoints: Record<PlayerId, number>;
+  // Pre-game team picker (Family Feud, Tanks in teams mode).
+  teamAssignments: Record<PlayerId, "1" | "2">;
 }
 
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours of inactivity
@@ -192,6 +194,7 @@ class RoomManager {
       seriesActive: false,
       seriesIndex: -1,
       seriesPoints: {},
+      teamAssignments: {},
     };
     this.rooms.set(code, room);
     return { code, playerId, token };
@@ -241,6 +244,7 @@ class RoomManager {
     if (!getGame(gameId)) throw new RoomError("Unknown game.");
     room.gameId = gameId;
     room.gameOptions = {};
+    room.teamAssignments = {};
     this.touch(room);
   }
 
@@ -253,6 +257,30 @@ class RoomManager {
     this.touch(room);
   }
 
+  // Any player can pick their own side — self-service, like choosing a seat
+  // rather than needing the host to assign everyone. Team games map the
+  // generic "1"/"2" here to their own team ids when the game actually starts.
+  setTeam(code: string, playerId: PlayerId, team: "1" | "2"): void {
+    const room = this.getRoomOrThrow(code);
+    if (room.status !== "lobby") throw new RoomError("Can't change teams mid-game.");
+    if (!room.players.has(playerId)) throw new RoomError("You're not in this room.");
+    room.teamAssignments = { ...room.teamAssignments, [playerId]: team };
+    this.touch(room);
+  }
+
+  kickPlayer(code: string, requesterId: PlayerId, targetId: PlayerId): void {
+    const room = this.getRoomOrThrow(code);
+    this.assertHost(room, requesterId);
+    if (room.status !== "lobby") throw new RoomError("Can't remove players mid-game — end the game first.");
+    if (targetId === requesterId) throw new RoomError("You can't kick yourself.");
+    if (!room.players.has(targetId)) throw new RoomError("That player isn't in this room.");
+    room.players.delete(targetId);
+    room.playerOrder = room.playerOrder.filter((id) => id !== targetId);
+    const { [targetId]: _removed, ...restTeams } = room.teamAssignments;
+    room.teamAssignments = restTeams;
+    this.touch(room);
+  }
+
   // Shared by single-game startGame and Series Mode's startSeries/
   // nextSeriesGame — validates player counts, builds initial state, and
   // flips the room into "in-game".
@@ -262,13 +290,21 @@ class RoomManager {
     const players = room.playerOrder.map((id) => room.players.get(id)!).filter((p) => p.connected);
     if (players.length < game.meta.minPlayers) throw new RoomError(`${game.meta.name} needs at least ${game.meta.minPlayers} players.`);
     if (players.length > game.meta.maxPlayers) throw new RoomError(`${game.meta.name} supports at most ${game.meta.maxPlayers} players.`);
+    const resolved = resolveOptions(game.meta, options);
+    // Smuggle any lobby team picks through as a reserved raw field (outside
+    // the declared meta.options schema, so resolveOptions doesn't strip it)
+    // — team-aware games read this themselves and fall back to a random
+    // split if it's absent, so choosing teams is opt-in, not required.
+    const relevantAssignments = Object.fromEntries(players.filter((p) => room.teamAssignments[p.id]).map((p) => [p.id, room.teamAssignments[p.id]]));
+    if (Object.keys(relevantAssignments).length > 0) resolved.__teams = JSON.stringify(relevantAssignments);
     try {
-      room.gameState = await game.createInitialState(players, resolveOptions(game.meta, options));
+      room.gameState = await game.createInitialState(players, resolved);
     } catch (err) {
       throw new RoomError(err instanceof Error ? err.message : "Failed to start the game.");
     }
     room.gameId = gameId;
     room.status = "in-game";
+    room.teamAssignments = {};
     this.touch(room);
     this.maybeStartTicking(room.code);
   }
@@ -361,6 +397,7 @@ class RoomManager {
     room.seriesActive = false;
     room.seriesIndex = -1;
     room.seriesPoints = {};
+    room.teamAssignments = {};
     this.touch(room);
   }
 
@@ -381,6 +418,7 @@ class RoomManager {
       seriesIndex: room.seriesIndex,
       seriesActive: room.seriesActive,
       seriesPoints: room.seriesPoints,
+      teamAssignments: room.teamAssignments,
     };
   }
 

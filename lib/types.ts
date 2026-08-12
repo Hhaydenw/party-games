@@ -26,6 +26,12 @@ export interface RoomSummary {
   seriesIndex: number; // index into seriesQueue of the game currently playing/just finished
   seriesActive: boolean;
   seriesPoints: Record<PlayerId, number>;
+  // Pre-game team picker for team-based games (Family Feud, Tanks in teams
+  // mode): each player who has chosen a side maps to "1" or "2" here.
+  // Generic labels rather than a game's own team ids ("A"/"B", "red"/"blue")
+  // since this is set in the lobby before any specific game's state exists;
+  // each team game's own createInitialState maps "1"/"2" to its own ids.
+  teamAssignments: Record<PlayerId, "1" | "2">;
 }
 
 // A configurable setting a game exposes in the lobby before it starts (e.g.
@@ -102,6 +108,13 @@ export interface ServerToClientEvents {
   "session": (payload: { playerId: PlayerId; token: string; code: string }) => void;
   "error:message": (message: string) => void;
   "chat:message": (payload: { playerId: PlayerId; name: string; text: string; at: number }) => void;
+  // Ephemeral, Google Meet-style floating reactions — never stored in room
+  // state, just relayed live to everyone currently in the room.
+  "room:emote": (payload: { playerId: PlayerId; name: string; emoji: string; at: number }) => void;
+  // Sent directly to a kicked player's own socket so their client can show
+  // why they were bounced back to the join screen, distinct from a normal
+  // disconnect/room-closed case.
+  "room:kicked": (payload: { reason: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -115,6 +128,9 @@ export interface ClientToServerEvents {
   "room:setSeriesQueue": (payload: { gameIds: string[] }) => void;
   "room:startSeries": () => void;
   "room:nextSeriesGame": () => void;
+  "room:setTeam": (payload: { team: "1" | "2" }) => void;
+  "room:kickPlayer": (payload: { playerId: PlayerId }) => void;
   "game:action": (payload: { action: unknown }) => void;
   "chat:send": (payload: { text: string }) => void;
+  "room:emote": (payload: { emoji: string }) => void;
 }

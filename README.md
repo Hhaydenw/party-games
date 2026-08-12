@@ -41,6 +41,28 @@ customization yet), and there's no upfront check that every queued game's
 player-count range fits the room — if one doesn't, you'll find out (via the
 normal error message) when the series reaches it.
 
+**Team picking**: Family Feud (always) and Tank Arena (when its "teams" option
+is chosen) get a **Choose teams** panel in the lobby — anyone can click Team
+Red or Team Blue to pick their own side, switch anytime before the game
+starts, and see who else has picked. Nobody's forced to choose: whoever
+hasn't when the game starts gets balanced onto whichever team is smaller, so
+it works exactly like before if nobody bothers with it. Series Mode only
+shows this when Family Feud is in the queue, since Tanks defaults to solo
+there (queued games use default options — see Series Mode above).
+
+**Kicking players**: before a game (or series) starts, the host can remove
+anyone from the room — a ✕ next to their name in the lobby's player list.
+The removed player gets a clear "the host removed you" message and is
+dropped back to the join screen, rather than just silently vanishing from
+the roster while still thinking they're in the room. Only available in the
+lobby, not mid-game.
+
+**Emotes**: a 😊 button in the header (lobby and in-game) opens a quick
+reaction picker — 👍❤️😂🎉👏😮🔥👎 — that floats up and fades on everyone's
+screen the moment you send one, the same idea as Google Meet's in-call
+reactions. Nothing's saved or logged anywhere; it's purely a live, ephemeral
+broadcast to whoever's currently in the room.
+
 **Sound**: every game that can meaningfully use sound effects has them — card
 plays, buzzers, reveals, shots, wins, and so on. There are no audio files to
 license or download: every effect is synthesized on the fly with the Web Audio
@@ -277,6 +299,20 @@ survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-me
   `getRanking(state): PlayerId[]` (best to worst) and converts finish
   position into placement points added onto `seriesPoints` — see the
   `GameDefinition` interface and each game's `getRanking` implementation.
+- **Team picking**: the lobby's team choices live in `room.teamAssignments`
+  (generic `"1"`/`"2"`, since they're set before any specific game's state
+  exists). `startGameInternal` smuggles them through as a reserved `__teams`
+  field on `options` — outside the declared `meta.options` schema, so
+  `resolveOptions` doesn't strip it — and `lib/games/teamAssign.ts`'s
+  `assignTeams()` (used by `familyFeud.ts`/`tanks.ts`) reads it, balancing
+  anyone who didn't pick onto the smaller team.
+- **Kicking**: `roomManager.kickPlayer` removes the player server-side;
+  `server/index.ts` separately finds their live socket (if connected), emits
+  a dedicated `room:kicked` event, and evicts them from the room's socket.IO
+  channel so they stop receiving further broadcasts.
+- **Emotes**: `room:emote` is a pure relay — the server checks the emoji
+  against an allowed set and re-broadcasts to everyone in the room; nothing
+  is ever written into room state, so there's no history/log of them.
 
 Sessions (so refreshing the page or a dropped wifi connection doesn't kick you out
 of a room) are stored in the browser via `localStorage`, keyed per room code, and

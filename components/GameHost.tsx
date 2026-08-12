@@ -5,6 +5,7 @@ import { useParty } from "@/lib/socketClient";
 import GameView from "@/components/GameView";
 import PlayerList from "@/components/PlayerList";
 import SoundSettingsButton from "@/components/SoundSettingsButton";
+import EmoteBar from "@/components/EmoteBar";
 
 export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
   const { gameView, sendAction, error, clearError, returnToLobby } = useParty();
@@ -21,6 +22,7 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
           <span className="text-sm text-slate-400">
             Room <span className="font-semibold tracking-[0.2em] text-gold">{room.code}</span>
           </span>
+          <EmoteBar />
           <SoundSettingsButton />
           {me.isHost && (
             <button className="btn-secondary px-3 py-1.5 text-sm" onClick={returnToLobby}>

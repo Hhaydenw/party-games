@@ -9,11 +9,12 @@ import PlayerList from "@/components/PlayerList";
 import ChatBox from "@/components/ChatBox";
 import GameOptionsPanel from "@/components/GameOptionsPanel";
 import SoundSettingsButton from "@/components/SoundSettingsButton";
+import EmoteBar from "@/components/EmoteBar";
 
 const CATEGORY_LABEL: Record<string, string> = { card: "🃏 Card", board: "🎲 Board", party: "📱 Party" };
 
 export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
-  const { selectGame, startGame, setSeriesQueue, startSeries, error, clearError } = useParty();
+  const { selectGame, startGame, setSeriesQueue, startSeries, setTeam, kickPlayer, error, clearError } = useParty();
   const games = listAvailableGames();
   const selected = games.find((g) => g.id === room.gameId);
   const connectedCount = room.players.filter((p) => p.connected).length;
@@ -44,6 +45,14 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
 
   const displayedQueue = me.isHost ? queueDraft : room.seriesQueue;
 
+  // Team games get a pre-game team picker. Family Feud always needs teams;
+  // Tanks only when its "teams" option is chosen. Series Mode plays each
+  // game with default options (no per-game customization yet), so Tanks
+  // would default to solo there — only Family Feud triggers it in a series.
+  const showTeamPicker = seriesMode
+    ? displayedQueue.includes("family-feud")
+    : room.gameId === "family-feud" || (room.gameId === "tanks" && room.gameOptions.mode === "teams");
+
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 py-10">
       <header className="flex flex-wrap items-center justify-between gap-4">
@@ -52,6 +61,7 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
           <span className="text-sm text-slate-400">
             Room <span className="font-semibold tracking-[0.2em] text-gold">{room.code}</span>
           </span>
+          <EmoteBar />
           <SoundSettingsButton />
         </div>
       </header>
@@ -168,6 +178,42 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
               {me.isHost && displayedQueue.length === 1 && <p className="mt-2 text-xs text-slate-500">Add at least one more game.</p>}
             </div>
           )}
+
+          {showTeamPicker && (
+            <div className="mt-6 rounded-2xl bg-white/5 p-4">
+              <h3 className="mb-3 text-sm font-semibold text-slate-300">Choose teams</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(["1", "2"] as const).map((team) => {
+                  const isRed = team === "1";
+                  const members = room.players.filter((p) => room.teamAssignments[p.id] === team);
+                  return (
+                    <div key={team} className={`rounded-xl border p-3 ${isRed ? "border-red-400/40 bg-red-500/10" : "border-blue-400/40 bg-blue-500/10"}`}>
+                      <p className={`mb-2 text-xs font-black uppercase tracking-widest ${isRed ? "text-red-400" : "text-blue-400"}`}>
+                        Team {isRed ? "Red" : "Blue"}
+                      </p>
+                      <ul className="flex min-h-[1.5rem] flex-col gap-1 text-sm text-slate-200">
+                        {members.length === 0 && <li className="text-slate-500">Empty</li>}
+                        {members.map((p) => (
+                          <li key={p.id}>{p.id === me.id ? "You" : p.name}</li>
+                        ))}
+                      </ul>
+                      <button
+                        className="btn-secondary mt-3 w-full py-1.5 text-xs"
+                        disabled={room.teamAssignments[me.id] === team}
+                        onClick={() => setTeam(team)}
+                      >
+                        {room.teamAssignments[me.id] === team ? "✓ On this team" : "Join"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Anyone who doesn't pick a side gets balanced onto a team automatically when the game starts.
+              </p>
+            </div>
+          )}
+
           {error && (
             <p className="mt-3 cursor-pointer text-sm text-accent" onClick={clearError}>
               {error} (dismiss)
@@ -179,7 +225,7 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
           <InviteLink code={room.code} />
           <div className="card-surface rounded-3xl p-4">
             <h3 className="mb-3 text-sm font-semibold text-slate-300">Players ({room.players.length})</h3>
-            <PlayerList players={room.players} meId={me.id} />
+            <PlayerList players={room.players} meId={me.id} onKick={me.isHost ? kickPlayer : undefined} />
           </div>
           {room.players.some((p) => p.score > 0) && (
             <div className="card-surface rounded-3xl p-4">

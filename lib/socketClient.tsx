@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { ClientToServerEvents, GameOptions, RoomSummary, ServerToClientEvents } from "@/lib/types";
+import { ClientToServerEvents, GameOptions, PlayerId, RoomSummary, ServerToClientEvents } from "@/lib/types";
 
 export interface StoredSession {
   code: string;
@@ -15,6 +15,14 @@ export interface ChatMessage {
   playerId: string;
   name: string;
   text: string;
+  at: number;
+}
+
+export interface EmoteEvent {
+  id: string;
+  playerId: string;
+  name: string;
+  emoji: string;
   at: number;
 }
 
@@ -37,12 +45,19 @@ function saveSession(session: StoredSession) {
   window.localStorage.setItem(sessionKey(session.code), JSON.stringify(session));
 }
 
+function clearSession(code: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(sessionKey(code));
+}
+
 interface Ctx {
   connected: boolean;
   room: RoomSummary | null;
   gameView: { gameId: string; view: unknown } | null;
   error: string | null;
   chatMessages: ChatMessage[];
+  emotes: EmoteEvent[];
+  kickedReason: string | null;
   clearError: () => void;
   createRoom: (name: string) => Promise<{ ok: true; code: string } | { ok: false; error: string }>;
   joinRoom: (code: string, name: string) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -54,8 +69,11 @@ interface Ctx {
   setSeriesQueue: (gameIds: string[]) => void;
   startSeries: () => void;
   nextSeriesGame: () => void;
+  setTeam: (team: "1" | "2") => void;
+  kickPlayer: (playerId: PlayerId) => void;
   sendAction: (action: unknown) => void;
   sendChat: (text: string) => void;
+  sendEmote: (emoji: string) => void;
   currentPlayerId: string | null;
 }
 
@@ -68,18 +86,36 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [gameView, setGameView] = useState<{ gameId: string; view: unknown } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [emotes, setEmotes] = useState<EmoteEvent[]>([]);
+  const [kickedReason, setKickedReason] = useState<string | null>(null);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
+  const currentCodeRef = useRef<string | null>(null);
 
   useEffect(() => {
     const socket = io({ path: "/socket.io" });
     socketRef.current = socket;
+    let emoteSeq = 0;
 
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
-    socket.on("room:state", (summary) => setRoom(summary));
+    socket.on("room:state", (summary) => {
+      setRoom(summary);
+      currentCodeRef.current = summary.code;
+    });
     socket.on("game:view", (payload) => setGameView(payload));
     socket.on("error:message", (message) => setError(message));
     socket.on("chat:message", (msg) => setChatMessages((prev) => [...prev.slice(-49), msg]));
+    socket.on("room:emote", (payload) => {
+      emoteSeq += 1;
+      const event: EmoteEvent = { id: `e${emoteSeq}`, ...payload };
+      setEmotes((prev) => [...prev.slice(-19), event]);
+    });
+    socket.on("room:kicked", ({ reason }) => {
+      if (currentCodeRef.current) clearSession(currentCodeRef.current);
+      setKickedReason(reason);
+      setRoom(null);
+      setGameView(null);
+    });
     socket.on("session", ({ playerId, token, code }) => {
       setCurrentPlayerId(playerId);
       const existing = loadSession(code);
@@ -139,8 +175,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const setSeriesQueue = useCallback((gameIds: string[]) => socketRef.current?.emit("room:setSeriesQueue", { gameIds }), []);
   const startSeries = useCallback(() => socketRef.current?.emit("room:startSeries"), []);
   const nextSeriesGame = useCallback(() => socketRef.current?.emit("room:nextSeriesGame"), []);
+  const setTeam = useCallback((team: "1" | "2") => socketRef.current?.emit("room:setTeam", { team }), []);
+  const kickPlayer = useCallback((playerId: PlayerId) => socketRef.current?.emit("room:kickPlayer", { playerId }), []);
   const sendAction = useCallback((action: unknown) => socketRef.current?.emit("game:action", { action }), []);
   const sendChat = useCallback((text: string) => socketRef.current?.emit("chat:send", { text }), []);
+  const sendEmote = useCallback((emoji: string) => socketRef.current?.emit("room:emote", { emoji }), []);
   const clearError = useCallback(() => setError(null), []);
 
   const value = useMemo<Ctx>(
@@ -150,6 +189,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       gameView,
       error,
       chatMessages,
+      emotes,
+      kickedReason,
       clearError,
       createRoom,
       joinRoom,
@@ -161,8 +202,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setSeriesQueue,
       startSeries,
       nextSeriesGame,
+      setTeam,
+      kickPlayer,
       sendAction,
       sendChat,
+      sendEmote,
       currentPlayerId,
     }),
     [
@@ -171,6 +215,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       gameView,
       error,
       chatMessages,
+      emotes,
+      kickedReason,
       clearError,
       createRoom,
       joinRoom,
@@ -182,8 +228,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setSeriesQueue,
       startSeries,
       nextSeriesGame,
+      setTeam,
+      kickPlayer,
       sendAction,
       sendChat,
+      sendEmote,
       currentPlayerId,
     ]
   );

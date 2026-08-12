@@ -1,4 +1,5 @@
 import { GameDefinition, GameOptions, PlayerId } from "@/lib/types";
+import { assignTeams } from "./teamAssign";
 
 // A real-time top-down tank battle: WASD to move, aim and shoot with the
 // mouse. Unlike every other game here this isn't turn-based — the server
@@ -136,10 +137,11 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
     const host = playersIn.find((p) => p.isHost) ?? playersIn[0]!;
     const mode = options.mode === "teams" ? "teams" : "solo";
     const order = playersIn.map((p) => p.id);
+    const teamAssignment = mode === "teams" ? assignTeams(playersIn, options, ["red", "blue"] as const) : {};
     const players: Record<PlayerId, TankPlayer> = {};
     order.forEach((id, i) => {
       const [x, y] = pickSpawn(i);
-      const team: TeamId = mode === "teams" ? (i % 2 === 0 ? "red" : "blue") : "solo";
+      const team: TeamId = mode === "teams" ? teamAssignment[id]! : "solo";
       players[id] = {
         id,
         team,

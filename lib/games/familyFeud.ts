@@ -1,4 +1,5 @@
 import { GameActionError, GameDefinition, GameOptions, PlayerId, PlayerInfo } from "@/lib/types";
+import { assignTeams } from "./teamAssign";
 
 // A simplified Family Feud: two teams, survey questions with ranked hidden
 // answers, a buzz-in face-off to win control of the board, and a steal
@@ -1199,10 +1200,10 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
   },
   createInitialState(players: PlayerInfo[], options: GameOptions) {
     const host = players.find((p) => p.isHost) ?? players[0]!;
-    const shuffled = shuffle(players);
     const teamA: FeudTeam = { id: "A", name: "Team Red", memberIds: [], score: 0 };
     const teamB: FeudTeam = { id: "B", name: "Team Blue", memberIds: [], score: 0 };
-    shuffled.forEach((p, i) => (i % 2 === 0 ? teamA : teamB).memberIds.push(p.id));
+    const assignment = assignTeams(players, options, ["A", "B"] as const);
+    for (const p of players) (assignment[p.id] === "A" ? teamA : teamB).memberIds.push(p.id);
     const roundCount = Math.min(Number(options.rounds) || DEFAULT_ROUNDS, QUESTION_BANK.length);
     const allIndices = QUESTION_BANK.map((_, i) => i);
     const freshIndices = allIndices.filter((i) => !usedPrompts.has(QUESTION_BANK[i]!.prompt));

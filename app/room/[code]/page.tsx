@@ -11,8 +11,9 @@ import FinishedBanner from "@/components/FinishedBanner";
 export default function RoomPage() {
   const params = useParams<{ code: string }>();
   const code = (params.code ?? "").toUpperCase();
-  const { room, connected, currentPlayerId, rejoinRoom } = useParty();
+  const { room, connected, currentPlayerId, rejoinRoom, kickedReason } = useParty();
   const [rejoinState, setRejoinState] = useState<"checking" | "none" | "failed" | "ok">("checking");
+  const [dismissedKick, setDismissedKick] = useState(false);
 
   useEffect(() => {
     if (!connected || !code) return;
@@ -30,6 +31,19 @@ export default function RoomPage() {
       cancelled = true;
     };
   }, [connected, code, rejoinRoom]);
+
+  if (kickedReason && !dismissedKick) {
+    return (
+      <Centered>
+        <div className="flex flex-col items-center gap-4 text-center">
+          <p className="text-lg font-semibold text-accent">🚪 {kickedReason}</p>
+          <button className="btn-secondary" onClick={() => setDismissedKick(true)}>
+            Back to join screen
+          </button>
+        </div>
+      </Centered>
+    );
+  }
 
   if (!connected || rejoinState === "checking") {
     return <Centered>Connecting…</Centered>;

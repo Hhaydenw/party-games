@@ -164,6 +164,56 @@ app.prepare().then(() => {
       }
     });
 
+    socket.on("room:setTeam", ({ team }) => {
+      const meta = socketMeta.get(socket.id);
+      if (!meta) return;
+      try {
+        roomManager.setTeam(meta.code, meta.playerId, team);
+        broadcastRoomState(io, meta.code);
+      } catch (err) {
+        socket.emit("error:message", err instanceof RoomError ? err.message : "Something went wrong.");
+      }
+    });
+
+    socket.on("room:kickPlayer", ({ playerId: targetId }) => {
+      const meta = socketMeta.get(socket.id);
+      if (!meta) return;
+      try {
+        roomManager.kickPlayer(meta.code, meta.playerId, targetId);
+        // Find the kicked player's own socket (if connected) and evict them
+        // from the room channel so they stop receiving broadcasts, with a
+        // dedicated event so their client can show why, distinct from a
+        // normal disconnect.
+        for (const [socketId, m] of socketMeta) {
+          if (m.code === meta.code && m.playerId === targetId) {
+            const targetSocket = io.sockets.sockets.get(socketId);
+            targetSocket?.emit("room:kicked", { reason: "The host removed you from the room." });
+            targetSocket?.leave(roomChannel(meta.code));
+            socketMeta.delete(socketId);
+          }
+        }
+        broadcastRoomState(io, meta.code);
+      } catch (err) {
+        socket.emit("error:message", err instanceof RoomError ? err.message : "Something went wrong.");
+      }
+    });
+
+    socket.on("room:emote", ({ emoji }) => {
+      const meta = socketMeta.get(socket.id);
+      if (!meta) return;
+      let summary;
+      try {
+        summary = roomManager.getSummary(meta.code);
+      } catch {
+        return;
+      }
+      const player = summary.players.find((p) => p.id === meta.playerId);
+      if (!player) return;
+      const allowed = ["👍", "❤️", "😂", "🎉", "👏", "😮", "🔥", "👎"];
+      if (!allowed.includes(emoji)) return;
+      io.to(roomChannel(meta.code)).emit("room:emote", { playerId: meta.playerId, name: player.name, emoji, at: Date.now() });
+    });
+
     socket.on("room:returnToLobby", () => {
       const meta = socketMeta.get(socket.id);
       if (!meta) return;

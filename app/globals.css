@@ -70,3 +70,18 @@ body {
     transform: scale(1) rotateX(0deg);
   }
 }
+
+@keyframes emote-rise {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: translateY(-10vh) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-70vh) scale(1);
+    opacity: 0;
+  }
+}

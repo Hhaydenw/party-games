@@ -1,6 +1,16 @@
 import { PlayerInfo } from "@/lib/types";
 
-export default function PlayerList({ players, meId }: { players: PlayerInfo[]; meId: string }) {
+export default function PlayerList({
+  players,
+  meId,
+  onKick,
+}: {
+  players: PlayerInfo[];
+  meId: string;
+  // Only passed by the lobby (host view) — kicking only makes sense, and is
+  // only allowed server-side, before a game/series has started.
+  onKick?: (playerId: string) => void;
+}) {
   return (
     <ul className="flex flex-col gap-2">
       {players.map((p) => (
@@ -10,8 +20,23 @@ export default function PlayerList({ players, meId }: { players: PlayerInfo[]; m
             {p.name}
             {p.id === meId && <span className="text-slate-500"> (you)</span>}
           </span>
-          {p.isHost && <span className="ml-auto text-xs text-gold">👑 host</span>}
-          {p.score > 0 && <span className="ml-auto text-xs text-slate-400">🏆 {p.score} win{p.score === 1 ? "" : "s"}</span>}
+          <span className="ml-auto flex items-center gap-2">
+            {p.isHost && <span className="text-xs text-gold">👑 host</span>}
+            {p.score > 0 && (
+              <span className="text-xs text-slate-400">
+                🏆 {p.score} win{p.score === 1 ? "" : "s"}
+              </span>
+            )}
+            {onKick && !p.isHost && (
+              <button
+                className="rounded-md px-1.5 py-0.5 text-xs text-slate-500 transition hover:bg-accent/20 hover:text-accent"
+                title={`Remove ${p.name} from the room`}
+                onClick={() => onKick(p.id)}
+              >
+                ✕
+              </button>
+            )}
+          </span>
         </li>
       ))}
     </ul>
