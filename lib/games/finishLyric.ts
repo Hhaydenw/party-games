@@ -1,22 +1,26 @@
 import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/types";
-import { DECADE_CHOICES, GENRE_CHOICES, SongResult, searchSongs } from "./songSource";
+import { SongResult, searchSongs } from "./songSource";
+import { TranscriptWord, transcribeClip } from "../transcribe";
+import { DEFAULT_ROUNDS, finishLyricMeta } from "./finishLyric.meta";
 
-// "Finish the Lyric": a short clip plays, then cuts off, and the next line
-// of that song's actual lyrics is shown entirely blanked out — one
+// "Finish the Lyric": a short clip plays, then cuts off right where the
+// lyrics actually start, and that line is shown entirely blanked out — one
 // underscore-run per word — for everyone to race to type. Songs come from
 // the same live iTunes search pool as Name That Tune (`songSource.ts`); the
 // lyric text itself comes from lyrics.ovh, a free, keyless lyrics API.
 //
-// Neither free API exposes word-level timing, so there's no way to know
-// exactly when a given lyric line is sung within the preview clip. To keep
-// the clip-then-blank flow actually making sense despite that, this always
-// targets the *opening* line of the song (typically sung shortly after the
-// clip starts, once any instrumental intro ends) and trims playback to a
-// short `CLIP_SECONDS` window — see `FinishLyricView.tsx`, which cuts the
-// audio off client-side and only reveals the blanks once the clip stops.
-export const CLIP_SECONDS = 7;
+// Neither of those APIs exposes word-level timing, so the server transcribes
+// the clip itself with a self-hosted, open-source Whisper model
+// (`lib/transcribe.ts` — no paid API, no API key) and fuzzy-aligns the real
+// lyrics text against that transcript to find where a specific line actually
+// starts in the audio. That gives a real, verified cutoff time. If
+// transcription or alignment doesn't succeed for a given song (model hiccup,
+// non-English lyrics, an intro that runs past the clip, etc.), this falls
+// back to picking the lyrics' opening line with `cutoffSeconds: null`, and
+// the client does its own best-effort audio-onset detection instead (see
+// `lib/audioOnset.ts` and `FinishLyricView.tsx`).
+export const CLIP_SECONDS = 7; // fallback clip length when there's no verified cutoff
 const ROUND_MS = 32_000; // covers the clip plus a real guessing window after it
-const DEFAULT_ROUNDS = 8;
 
 // Tracks song titles already used, across games, for the lifetime of this
 // server process, mirroring Name That Tune's freshness guarantee.
@@ -25,6 +29,7 @@ const usedTitles = new Set<string>();
 interface LyricLine {
   raw: string;
   words: string[];
+  cutoffSeconds: number | null;
 }
 
 interface LyricsOvhResponse {
@@ -36,12 +41,7 @@ const SECTION_MARKER_RE = /^[[(].*[\])]$/;
 const SECTION_WORD_RE = /chorus|verse\s*\d*|bridge|outro|intro|refrain|pre-chorus/i;
 const CLEAN_LINE_RE = /^[a-zA-Z0-9'",.!?;: -]+$/;
 
-// Fetches the song's lyrics and picks the opening usable line — real prose,
-// not a section marker, a reasonable length to blank out and guess. Taking
-// the *first* line (rather than a random one from anywhere in the song) is
-// what makes the short clip-then-blank cutoff make sense: it's the line
-// most likely to land right around where the clip stops.
-async function fetchLyricLine(song: SongResult): Promise<LyricLine | null> {
+async function fetchCleanLyricLines(song: SongResult): Promise<string[] | null> {
   const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(song.artist)}/${encodeURIComponent(song.title)}`;
   try {
     const res = await fetch(url);
@@ -52,19 +52,78 @@ async function fetchLyricLine(song: SongResult): Promise<LyricLine | null> {
       .split("\n")
       .map((l) => l.trim())
       .filter((l) => l.length > 0 && !SECTION_MARKER_RE.test(l) && !SECTION_WORD_RE.test(l) && CLEAN_LINE_RE.test(l));
-    if (lines.length < 4) return null;
-
-    const frontPool = lines.slice(0, 6).filter((l) => {
-      const wc = l.split(/\s+/).filter(Boolean).length;
-      return wc >= 3 && wc <= 8;
-    });
-    const pick = frontPool[0] ?? lines.find((l) => l.split(/\s+/).filter(Boolean).length >= 2) ?? lines[0]!;
-    const words = pick.split(/\s+/).filter(Boolean);
-    if (words.length < 2) return null;
-    return { raw: pick, words };
+    return lines.length >= 4 ? lines : null;
   } catch {
     return null;
   }
+}
+
+function normalizeWord(w: string): string {
+  return w.toLowerCase().replace(/[^a-z0-9']/g, "");
+}
+
+function wordCountOk(line: string): boolean {
+  const wc = line.split(/\s+/).filter(Boolean).length;
+  return wc >= 3 && wc <= 8;
+}
+
+// Walks the real lyrics in song order and, for each candidate line, checks
+// whether its opening words show up — in order, within a small span — in
+// the transcript. The first one that matches is both the earliest usable
+// line *and* has a real, verified moment in the audio where it starts.
+function alignLineToTranscript(lines: string[], transcript: TranscriptWord[]): { raw: string; cutoffSeconds: number } | null {
+  const transcriptWords = transcript.map((t) => normalizeWord(t.word)).filter(Boolean);
+  for (const line of lines) {
+    if (!wordCountOk(line)) continue;
+    const lineWords = line
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(normalizeWord)
+      .filter(Boolean);
+    if (lineWords.length < 2) continue;
+    const probe = lineWords.slice(0, Math.min(3, lineWords.length));
+    const neededHits = Math.min(2, probe.length);
+
+    for (let i = 0; i < transcriptWords.length; i++) {
+      let hits = 0;
+      let cursor = i;
+      for (const w of probe) {
+        const idx = transcriptWords.slice(cursor, cursor + 4).indexOf(w);
+        if (idx === -1) break;
+        cursor += idx + 1;
+        hits += 1;
+      }
+      // Skip near-zero timestamps — almost certainly a false-positive match
+      // on incidental words rather than the actual start of this line.
+      if (hits >= neededHits && transcript[i]!.start >= 1) {
+        return { raw: line, cutoffSeconds: transcript[i]!.start };
+      }
+    }
+  }
+  return null;
+}
+
+// Fetches the song's real lyrics, transcribes the clip with the self-hosted
+// Whisper model, and tries to align the two for a verified line + cutoff.
+// Falls back to just picking the lyrics' opening line (unverified timing)
+// if transcription or alignment doesn't pan out.
+async function fetchLyricLine(song: SongResult): Promise<LyricLine | null> {
+  const [lines, transcript] = await Promise.all([fetchCleanLyricLines(song), transcribeClip(song.previewUrl)]);
+  if (!lines) return null;
+
+  if (transcript) {
+    const aligned = alignLineToTranscript(lines, transcript);
+    if (aligned) {
+      const words = aligned.raw.split(/\s+/).filter(Boolean);
+      if (words.length >= 2) return { raw: aligned.raw, words, cutoffSeconds: aligned.cutoffSeconds };
+    }
+  }
+
+  const frontPool = lines.slice(0, 6).filter(wordCountOk);
+  const pick = frontPool[0] ?? lines.find((l) => l.split(/\s+/).filter(Boolean).length >= 2) ?? lines[0]!;
+  const words = pick.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return null;
+  return { raw: pick, words, cutoffSeconds: null };
 }
 
 function blankPattern(words: string[]): string {
@@ -146,6 +205,7 @@ export interface FinishLyricState {
   previewUrl: string;
   answer: string;
   blankPattern: string;
+  cutoffSeconds: number | null;
   phase: LyricPhase;
   guesses: GuessLogEntry[];
   correctGuessers: PlayerId[];
@@ -159,6 +219,7 @@ export interface FinishLyricView {
   totalRounds: number;
   previewUrl: string;
   blankPattern: string;
+  cutoffSeconds: number | null;
   revealedAnswer: string | null;
   revealedTitle: string | null;
   revealedArtist: string | null;
@@ -188,19 +249,7 @@ function nextGuessId(): string {
 }
 
 export const finishLyric: GameDefinition<FinishLyricState, FinishLyricView, FinishLyricAction> = {
-  meta: {
-    id: "finish-the-lyric",
-    name: "Finish the Lyric",
-    tagline: "The song plays, the rest of the line goes blank — type it before anyone else.",
-    category: "party",
-    minPlayers: 2,
-    maxPlayers: 12,
-    options: [
-      { key: "rounds", label: "Rounds", type: "number", min: 3, max: 15, default: DEFAULT_ROUNDS },
-      { key: "genre", label: "Genre", type: "select", choices: GENRE_CHOICES, default: "all" },
-      { key: "decade", label: "Decade", type: "select", choices: DECADE_CHOICES, default: "all" },
-    ],
-  },
+  meta: finishLyricMeta,
   async createInitialState(players, options: GameOptions) {
     const host = players.find((p) => p.isHost) ?? players[0]!;
     const genre = String(options.genre ?? "all");
@@ -231,6 +280,7 @@ export const finishLyric: GameDefinition<FinishLyricState, FinishLyricView, Fini
       previewUrl: first.song.previewUrl,
       answer: first.line.raw,
       blankPattern: blankPattern(first.line.words),
+      cutoffSeconds: first.line.cutoffSeconds,
       phase: "guessing",
       guesses: [],
       correctGuessers: [],
@@ -290,6 +340,7 @@ export const finishLyric: GameDefinition<FinishLyricState, FinishLyricView, Fini
         previewUrl: next.song.previewUrl,
         answer: next.line.raw,
         blankPattern: blankPattern(next.line.words),
+        cutoffSeconds: next.line.cutoffSeconds,
         phase: "guessing",
         guesses: [],
         correctGuessers: [],
@@ -308,6 +359,7 @@ export const finishLyric: GameDefinition<FinishLyricState, FinishLyricView, Fini
       totalRounds: state.totalRounds,
       previewUrl: state.previewUrl,
       blankPattern: state.blankPattern,
+      cutoffSeconds: state.cutoffSeconds,
       revealedAnswer: revealed ? state.answer : null,
       revealedTitle: revealed ? state.title : null,
       revealedArtist: revealed ? state.artist : null,

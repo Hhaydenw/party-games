@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CLIP_SECONDS, FinishLyricAction, FinishLyricView as ViewType } from "@/lib/games/finishLyric";
+// Type-only: this must never pull in the real `finishLyric.ts` module at
+// runtime, since its engine transitively imports Node-only code (server-side
+// audio transcription — see lib/transcribe.ts) that can't be bundled for the
+// browser. `import type` is erased entirely at compile time.
+import type { FinishLyricAction, FinishLyricView as ViewType } from "@/lib/games/finishLyric";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
 import { detectVocalOnsetSeconds } from "@/lib/audioOnset";
 
+// Kept in sync with `CLIP_SECONDS` in lib/games/finishLyric.ts — duplicated
+// (rather than imported) so this component never has a runtime dependency
+// on that server-only module.
+const CLIP_SECONDS = 7;
 const HARD_CAP_SECONDS = 16; // absolute safety net if onset detection and timeupdate both somehow fail
 
 export default function FinishLyricView({
@@ -26,11 +34,14 @@ export default function FinishLyricView({
   const isHost = meId === view.hostId;
   // The clip is short and cuts itself off — the blank line only appears once
   // it stops, so it reads as "here's the clip... now finish the line" rather
-  // than showing the blanks and the audio at the same time. The cutoff
-  // starts as the fixed fallback and gets replaced by a real detected
-  // vocal-onset time (from analyzing the clip's own audio, client-side —
-  // see lib/audioOnset.ts) as soon as that finishes computing, usually
-  // well before playback reaches it.
+  // than showing the blanks and the audio at the same time.
+  //
+  // Best case: the server already transcribed the clip and fuzzy-aligned it
+  // against the song's real lyrics (see lib/transcribe.ts + finishLyric.ts),
+  // so `view.cutoffSeconds` is a verified, real cutoff — used directly, no
+  // guessing needed. If that didn't succeed for this song, fall back to
+  // client-side audio-onset detection (lib/audioOnset.ts), and if even that
+  // comes up empty, the fixed CLIP_SECONDS default.
   const [blanksRevealed, setBlanksRevealed] = useState(false);
   const cutoffRef = useRef(CLIP_SECONDS);
 
@@ -40,14 +51,16 @@ export default function FinishLyricView({
     const audio = audioRef.current;
     if (!audio || view.phase !== "guessing") return;
     setBlanksRevealed(false);
-    cutoffRef.current = CLIP_SECONDS;
+    cutoffRef.current = view.cutoffSeconds ?? CLIP_SECONDS;
     audio.currentTime = 0;
     audio.play().catch(() => setBlanksRevealed(true)); // autoplay blocked — don't block the round on it
 
     let cancelled = false;
-    detectVocalOnsetSeconds(view.previewUrl).then((onset) => {
-      if (!cancelled && onset !== null) cutoffRef.current = onset;
-    });
+    if (view.cutoffSeconds === null) {
+      detectVocalOnsetSeconds(view.previewUrl).then((onset) => {
+        if (!cancelled && onset !== null) cutoffRef.current = onset;
+      });
+    }
 
     // Absolute safety net in case timeupdate events never fire for some reason.
     const hardCap = setTimeout(() => {
@@ -59,7 +72,7 @@ export default function FinishLyricView({
       cancelled = true;
       clearTimeout(hardCap);
     };
-  }, [view.previewUrl, view.phase]);
+  }, [view.previewUrl, view.phase, view.cutoffSeconds]);
 
   // The actual cutoff: fires continuously during playback, so it picks up
   // the real detected onset time the moment it's ready rather than needing
