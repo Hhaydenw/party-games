@@ -83,13 +83,22 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   Finish the Lyric fetches the song's real lyrics from the free, keyless
   [lyrics.ovh](https://lyrics.ovh) API and blanks out the *opening* line —
   matching is lenient (small typos still count). Neither API exposes
-  word-level timing, so there's no way to know exactly when a line is sung
-  within the preview; targeting the opening line (usually sung shortly after
-  the clip starts) and cutting the clip itself down to ~7 seconds
-  client-side, with the blanks only appearing once the clip stops, is the
-  best approximation of "clip plays, then finish the line" that's possible
-  without paid/timestamped lyrics data. It can still occasionally miss if a
-  song's intro runs long.
+  word-level timing, so instead of guessing a fixed cutoff, the client
+  decodes the clip itself with the Web Audio API and runs real onset
+  detection (`lib/audioOnset.ts`): it measures energy in ~50ms windows,
+  takes the first second as the "quiet intro" baseline, and looks for the
+  first *sustained* jump well above that baseline (a single transient like a
+  drum hit doesn't count — it has to hold for ~200ms) as the moment vocals
+  actually start. The clip is cut right there, and the blank line only
+  appears once it stops — so the cutoff is grounded in that song's actual
+  audio rather than a blind fixed number, with a fixed ~7s fallback if
+  detection doesn't find a confident onset (e.g. an unusually quiet or noisy
+  clip). It's still a heuristic, not true lyric-to-audio alignment — that
+  would need real transcription (e.g. Whisper) matched against the fetched
+  lyrics, which is a meaningfully heavier addition — so it can still
+  occasionally miss on songs that open cold with vocals already going, but
+  it's noticeably more accurate than a fixed cutoff for the common case of
+  "instrumental intro, then vocals."
 - **Tank Arena** is the one real-time game here — everyone else is turn-based.
   WASD to move, aim/shoot with the mouse, solo free-for-all or 2 teams. The server
   runs a physics tick ~20x/second independent of player actions (see

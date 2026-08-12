@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { CLIP_SECONDS, FinishLyricAction, FinishLyricView as ViewType } from "@/lib/games/finishLyric";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { detectVocalOnsetSeconds } from "@/lib/audioOnset";
+
+const HARD_CAP_SECONDS = 16; // absolute safety net if onset detection and timeupdate both somehow fail
 
 export default function FinishLyricView({
   view,
@@ -23,8 +26,13 @@ export default function FinishLyricView({
   const isHost = meId === view.hostId;
   // The clip is short and cuts itself off — the blank line only appears once
   // it stops, so it reads as "here's the clip... now finish the line" rather
-  // than showing the blanks and the audio at the same time.
+  // than showing the blanks and the audio at the same time. The cutoff
+  // starts as the fixed fallback and gets replaced by a real detected
+  // vocal-onset time (from analyzing the clip's own audio, client-side —
+  // see lib/audioOnset.ts) as soon as that finishes computing, usually
+  // well before playback reaches it.
   const [blanksRevealed, setBlanksRevealed] = useState(false);
+  const cutoffRef = useRef(CLIP_SECONDS);
 
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
@@ -32,20 +40,33 @@ export default function FinishLyricView({
     const audio = audioRef.current;
     if (!audio || view.phase !== "guessing") return;
     setBlanksRevealed(false);
+    cutoffRef.current = CLIP_SECONDS;
     audio.currentTime = 0;
     audio.play().catch(() => setBlanksRevealed(true)); // autoplay blocked — don't block the round on it
-    const cutoff = setTimeout(() => {
+
+    let cancelled = false;
+    detectVocalOnsetSeconds(view.previewUrl).then((onset) => {
+      if (!cancelled && onset !== null) cutoffRef.current = onset;
+    });
+
+    // Absolute safety net in case timeupdate events never fire for some reason.
+    const hardCap = setTimeout(() => {
       audio.pause();
       setBlanksRevealed(true);
-    }, CLIP_SECONDS * 1000);
-    return () => clearTimeout(cutoff);
+    }, HARD_CAP_SECONDS * 1000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(hardCap);
+    };
   }, [view.previewUrl, view.phase]);
 
-  // Belt-and-suspenders: also cap playback if the clip is replayed/scrubbed
-  // past the cutoff via the native controls.
+  // The actual cutoff: fires continuously during playback, so it picks up
+  // the real detected onset time the moment it's ready rather than needing
+  // its own separately-scheduled timer.
   function handleTimeUpdate() {
     const audio = audioRef.current;
-    if (audio && audio.currentTime >= CLIP_SECONDS) {
+    if (audio && audio.currentTime >= cutoffRef.current) {
       audio.pause();
       setBlanksRevealed(true);
     }
