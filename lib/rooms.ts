@@ -1,6 +1,7 @@
 import { customAlphabet, nanoid } from "nanoid";
 import { GameActionError, GameMeta, GameOptions, PlayerId, PlayerInfo, RoomStatus, RoomSummary } from "@/lib/types";
 import { getGame } from "@/lib/games/registry";
+import { isValidAvatarColor, pickAvailableColor } from "@/lib/avatarColors";
 
 // Fills in defaults for any missing/invalid option and drops anything not
 // declared in the game's meta, so a game's reducer can trust `options` is
@@ -173,12 +174,13 @@ class RoomManager {
     return room;
   }
 
-  createRoom(name: string): { code: string; playerId: PlayerId; token: string } {
+  createRoom(name: string, color?: string): { code: string; playerId: PlayerId; token: string } {
     const trimmed = name.trim().slice(0, 24) || "Player";
     const code = this.makeCode();
     const playerId = nanoid(10);
     const token = nanoid(24);
-    const player: InternalPlayer = { id: playerId, name: trimmed, connected: true, isHost: true, score: 0, token };
+    const resolvedColor = isValidAvatarColor(color) ? color : pickAvailableColor([]);
+    const player: InternalPlayer = { id: playerId, name: trimmed, connected: true, isHost: true, score: 0, color: resolvedColor, token };
     const room: InternalRoom = {
       code,
       status: "lobby",
@@ -200,7 +202,7 @@ class RoomManager {
     return { code, playerId, token };
   }
 
-  joinRoom(code: string, name: string): { playerId: PlayerId; token: string } {
+  joinRoom(code: string, name: string, color?: string): { playerId: PlayerId; token: string } {
     const room = this.getRoomOrThrow(code);
     if (room.status !== "lobby") throw new RoomError("This room is mid-game. Wait for it to finish or ask the host to return to the lobby.");
     if (room.players.size >= 16) throw new RoomError("This room is full.");
@@ -212,9 +214,11 @@ class RoomManager {
       finalName = `${trimmed} (${suffix})`;
       suffix++;
     }
+    const usedColors = [...room.players.values()].map((p) => p.color);
+    const resolvedColor = isValidAvatarColor(color) && !usedColors.includes(color) ? color : pickAvailableColor(usedColors);
     const playerId = nanoid(10);
     const token = nanoid(24);
-    const player: InternalPlayer = { id: playerId, name: finalName, connected: true, isHost: false, score: 0, token };
+    const player: InternalPlayer = { id: playerId, name: finalName, connected: true, isHost: false, score: 0, color: resolvedColor, token };
     room.players.set(playerId, player);
     room.playerOrder.push(playerId);
     this.touch(room);

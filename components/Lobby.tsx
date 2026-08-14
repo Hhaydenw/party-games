@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { COMING_SOON, listAvailableGames } from "@/lib/games/registry";
 import { PlayerInfo, RoomSummary } from "@/lib/types";
 import { useParty } from "@/lib/socketClient";
@@ -10,6 +10,7 @@ import ChatBox from "@/components/ChatBox";
 import GameOptionsPanel from "@/components/GameOptionsPanel";
 import SoundSettingsButton from "@/components/SoundSettingsButton";
 import EmoteBar from "@/components/EmoteBar";
+import { getSoundSettings, startAmbient, stopAmbient, subscribeSoundSettings } from "@/lib/sound";
 
 const CATEGORY_LABEL: Record<string, string> = { card: "🃏 Card", board: "🎲 Board", party: "📱 Party" };
 
@@ -24,6 +25,23 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
   // automatically once the room already has a queue set up, so joining
   // players/guests see the right view without having to toggle it
   // themselves.
+  // The ambient pad only plays while an actual lobby screen is mounted (not
+  // mid-game or on the finished banner) and only if the player has it turned
+  // on in sound settings; it needs a user gesture to start (browser autoplay
+  // rules), so joining/creating a room via a form submit already satisfies
+  // that by the time this mounts.
+  useEffect(() => {
+    if (getSoundSettings().ambientOn) startAmbient();
+    const unsub = subscribeSoundSettings(() => {
+      if (getSoundSettings().ambientOn) startAmbient();
+      else stopAmbient();
+    });
+    return () => {
+      unsub();
+      stopAmbient();
+    };
+  }, []);
+
   const [seriesModeOn, setSeriesModeOn] = useState(false);
   const seriesMode = seriesModeOn || room.seriesQueue.length > 0;
 

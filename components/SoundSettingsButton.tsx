@@ -45,6 +45,15 @@ export default function SoundSettingsButton() {
                 className="accent-accent"
               />
             </label>
+            <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
+              <span className="text-xs text-slate-400">🎵 Lobby music</span>
+              <button
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${settings.ambientOn ? "bg-accent/20 text-accent" : "bg-white/10 text-slate-300"}`}
+                onClick={() => setSoundSettings({ ambientOn: !settings.ambientOn })}
+              >
+                {settings.ambientOn ? "On" : "Off"}
+              </button>
+            </div>
           </div>
         </>
       )}

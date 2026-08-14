@@ -74,7 +74,28 @@ still collapses to a single stacked column on narrower/mobile screens.
 plays, buzzers, reveals, shots, wins, and so on. There are no audio files to
 license or download: every effect is synthesized on the fly with the Web Audio
 API (`lib/sound.ts`). A speaker icon in the room header (lobby and in-game) opens
-volume/mute controls, saved per-browser via `localStorage`.
+volume/mute controls, saved per-browser via `localStorage`. That same panel has
+a **🎵 Lobby music** toggle (off by default) — a slow, generative synthesized
+chord pad that only plays while you're actually sitting in a lobby, not
+mid-game.
+
+**Avatars**: everyone picks a color when they create or join a room, shown as
+a colored initial "chip" everywhere the player list appears. Two players in
+the same room can't end up with the same color — if your pick (or a stale
+default) is already taken, you're bumped to the next free one from the
+10-color palette automatically.
+
+**Series standings get a bit of ceremony**: the interstitial between series
+games now medals the top three (🥇🥈🥉), highlights the current leader, and
+plays a short chime — a bigger fanfare on the final game — instead of just
+being a plain list.
+
+**Host quick-skip**: for the handful of games with a visible per-round
+countdown (Trivia Night, Doodle Guess, Family Feud, Name That Tune, Wildest
+Answer, Price Check), the host gets a **⏭ Skip round** button in the header
+to end a dragging round early instead of waiting out the full timer. Turn-based
+games without a clock, and real-time games like Tank Arena, don't show it since
+there's no timer for it to mean anything against.
 
 Nothing is on the "coming soon" shelf right now — see
 [Adding a new game](#adding-a-new-game) if you want to keep going.

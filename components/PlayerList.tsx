@@ -1,4 +1,5 @@
 import { PlayerInfo } from "@/lib/types";
+import Avatar from "@/components/Avatar";
 
 export default function PlayerList({
   players,
@@ -15,7 +16,12 @@ export default function PlayerList({
     <ul className="flex flex-col gap-2">
       {players.map((p) => (
         <li key={p.id} className="flex items-center gap-3 rounded-xl bg-white/5 px-3 py-2">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${p.connected ? "bg-emerald-400" : "bg-slate-600"}`} />
+          <span className="relative shrink-0">
+            <Avatar name={p.name} color={p.color} />
+            <span
+              className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-ink ${p.connected ? "bg-emerald-400" : "bg-slate-600"}`}
+            />
+          </span>
           <span className="truncate font-medium">
             {p.name}
             {p.id === meId && <span className="text-slate-500"> (you)</span>}

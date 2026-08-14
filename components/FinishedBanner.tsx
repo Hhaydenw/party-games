@@ -1,9 +1,13 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { PlayerInfo, RoomSummary } from "@/lib/types";
 import { useParty } from "@/lib/socketClient";
 import { listAvailableGames } from "@/lib/games/registry";
 import GameView from "@/components/GameView";
+import { playSound } from "@/lib/sound";
+
+const MEDALS = ["🥇", "🥈", "🥉"];
 
 // Shown right after a game ends. This reuses the exact same view component
 // the game used while playing (frozen on its last tick) so players see that
@@ -18,6 +22,16 @@ export default function FinishedBanner({ room, me }: { room: RoomSummary; me: Pl
   const isLastSeriesGame = inSeries && room.seriesIndex + 1 >= room.seriesQueue.length;
   const games = listAvailableGames();
   const nameFor = (id: string) => (id === me.id ? "You" : room.players.find((p) => p.id === id)?.name ?? "…");
+
+  // A little ceremony each time the series standings interstitial appears —
+  // once per game finish, not on every re-render as the frozen view ticks.
+  const announcedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (inSeries && announcedFor.current !== room.seriesIndex) {
+      announcedFor.current = room.seriesIndex;
+      playSound(isLastSeriesGame ? "win" : "reveal");
+    }
+  }, [inSeries, room.seriesIndex, isLastSeriesGame]);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[1800px] flex-col items-center gap-6 px-4 py-10 text-center sm:px-6 lg:px-8 lg:py-12">
@@ -47,15 +61,23 @@ export default function FinishedBanner({ room, me }: { room: RoomSummary; me: Pl
       )}
 
       {inSeries && (
-        <div className="card-surface w-full rounded-3xl p-4">
-          <h3 className="mb-3 text-sm font-semibold text-slate-300">🏆 Series standings</h3>
+        <div className="card-surface w-full overflow-hidden rounded-3xl p-4">
+          <h3 className="mb-3 text-sm font-semibold text-slate-300">
+            {isLastSeriesGame ? "🏆 Final series standings" : "🏆 Series standings so far"}
+          </h3>
           <ul className="flex flex-col gap-1.5 text-sm">
             {room.players
               .map((p) => ({ p, points: room.seriesPoints[p.id] ?? 0 }))
               .sort((a, b) => b.points - a.points)
-              .map(({ p, points }) => (
-                <li key={p.id} className="flex items-center justify-between">
-                  <span className={p.id === me.id ? "font-semibold text-gold" : "text-slate-300"}>{nameFor(p.id)}</span>
+              .map(({ p, points }, i) => (
+                <li
+                  key={p.id}
+                  className={`flex items-center justify-between rounded-xl px-2 py-1 ${i === 0 ? "bg-gold/10" : ""}`}
+                >
+                  <span className={`flex items-center gap-2 ${p.id === me.id ? "font-semibold text-gold" : "text-slate-300"}`}>
+                    <span className="w-5 text-center">{MEDALS[i] ?? `${i + 1}.`}</span>
+                    {nameFor(p.id)}
+                  </span>
                   <span className="text-slate-400">{points} pts</span>
                 </li>
               ))}

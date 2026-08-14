@@ -59,8 +59,8 @@ interface Ctx {
   emotes: EmoteEvent[];
   kickedReason: string | null;
   clearError: () => void;
-  createRoom: (name: string) => Promise<{ ok: true; code: string } | { ok: false; error: string }>;
-  joinRoom: (code: string, name: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  createRoom: (name: string, color?: string) => Promise<{ ok: true; code: string } | { ok: false; error: string }>;
+  joinRoom: (code: string, name: string, color?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   rejoinRoom: (code: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   selectGame: (gameId: string) => void;
   setGameOptions: (options: GameOptions) => void;
@@ -127,9 +127,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const createRoom = useCallback((name: string) => {
+  const createRoom = useCallback((name: string, color?: string) => {
     return new Promise<{ ok: true; code: string } | { ok: false; error: string }>((resolve) => {
-      socketRef.current?.emit("room:create", { name }, (res) => {
+      socketRef.current?.emit("room:create", { name, color }, (res) => {
         if (res.ok) {
           saveSession({ code: res.code, playerId: res.playerId, token: res.token, name });
           setCurrentPlayerId(res.playerId);
@@ -141,10 +141,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const joinRoom = useCallback((code: string, name: string) => {
+  const joinRoom = useCallback((code: string, name: string, color?: string) => {
     const upper = code.toUpperCase();
     return new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
-      socketRef.current?.emit("room:join", { code: upper, name }, (res) => {
+      socketRef.current?.emit("room:join", { code: upper, name, color }, (res) => {
         if (res.ok) {
           saveSession({ code: upper, playerId: res.playerId, token: res.token, name });
           setCurrentPlayerId(res.playerId);

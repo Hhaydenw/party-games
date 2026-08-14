@@ -26,10 +26,11 @@ export type SoundName =
 interface SoundSettings {
   muted: boolean;
   volume: number; // 0..1
+  ambientOn: boolean; // lobby ambient pad loop, off by default
 }
 
 const STORAGE_KEY = "party-games:sound";
-const DEFAULT_SETTINGS: SoundSettings = { muted: false, volume: 0.6 };
+const DEFAULT_SETTINGS: SoundSettings = { muted: false, volume: 0.6, ambientOn: false };
 
 let settings: SoundSettings = DEFAULT_SETTINGS;
 let hydrated = false;
@@ -159,6 +160,101 @@ const RECIPES: Record<SoundName, (ac: AudioContext, out: GainNode, t0: number) =
   hit: (ac, out, t0) => tone(ac, out, 220, t0, 0.08, { type: "square", peak: 0.2, sweepTo: 80 }),
   turn: (ac, out, t0) => tone(ac, out, 600, t0, 0.09, { type: "sine", peak: 0.18, sweepTo: 750 }),
 };
+
+// Lobby ambient pad: a few slow, detuned sine drones with a gentle LFO on
+// each note's own gain so it breathes instead of droning flatly, cycling
+// through a short chord progression. Entirely synthesized, like the SFX
+// above — no audio files, loops indefinitely until stopAmbient() is called.
+const PAD_CHORDS: number[][] = [
+  [130.81, 164.81, 196.0], // C3 E3 G3
+  [110.0, 146.83, 174.61], // A2 D3 F3
+  [98.0, 130.81, 164.81], // G2 C3 E3
+  [116.54, 155.56, 174.61], // A#2 D#3 F3
+];
+const CHORD_MS = 6000;
+
+let ambientNodes: { osc: OscillatorNode; gain: GainNode }[] = [];
+let ambientMaster: GainNode | null = null;
+let ambientChordTimer: ReturnType<typeof setInterval> | null = null;
+let ambientChordIndex = 0;
+
+function stopAmbientNodes() {
+  for (const { osc, gain } of ambientNodes) {
+    try {
+      gain.gain.cancelScheduledValues(0);
+      osc.stop();
+    } catch {
+      // already stopped
+    }
+  }
+  ambientNodes = [];
+}
+
+function playAmbientChord(ac: AudioContext, out: GainNode) {
+  stopAmbientNodes();
+  const chord = PAD_CHORDS[ambientChordIndex % PAD_CHORDS.length]!;
+  ambientChordIndex++;
+  const now = ac.currentTime;
+  for (const freq of chord) {
+    const osc = ac.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    const gain = ac.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.14, now + 1.5);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + CHORD_MS / 1000 - 0.3);
+    osc.connect(gain);
+    gain.connect(out);
+    osc.start(now);
+    osc.stop(now + CHORD_MS / 1000);
+    ambientNodes.push({ osc, gain });
+  }
+}
+
+export function isAmbientPlaying(): boolean {
+  return ambientMaster !== null;
+}
+
+export function startAmbient() {
+  hydrate();
+  if (ambientMaster) return; // already running
+  const ac = getCtx();
+  if (!ac) return;
+  ambientMaster = ac.createGain();
+  ambientMaster.gain.value = settings.muted ? 0 : settings.volume * 0.5;
+  ambientMaster.connect(ac.destination);
+  ambientChordIndex = 0;
+  playAmbientChord(ac, ambientMaster);
+  ambientChordTimer = setInterval(() => {
+    if (ac.state === "closed" || !ambientMaster) return;
+    playAmbientChord(ac, ambientMaster);
+  }, CHORD_MS);
+}
+
+export function stopAmbient() {
+  if (ambientChordTimer) {
+    clearInterval(ambientChordTimer);
+    ambientChordTimer = null;
+  }
+  stopAmbientNodes();
+  if (ambientMaster) {
+    try {
+      ambientMaster.disconnect();
+    } catch {
+      // ignore
+    }
+    ambientMaster = null;
+  }
+}
+
+// Keep the ambient loop's volume in sync with live mute/volume changes
+// without needing every caller to resubscribe themselves.
+if (typeof window !== "undefined") {
+  subscribeSoundSettings(() => {
+    if (ambientMaster) ambientMaster.gain.value = settings.muted ? 0 : settings.volume * 0.5;
+    if (!settings.ambientOn) stopAmbient();
+  });
+}
 
 export function playSound(name: SoundName) {
   hydrate();

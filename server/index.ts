@@ -58,9 +58,9 @@ app.prepare().then(() => {
   roomManager.onTick((code) => broadcastRoomState(io, code));
 
   io.on("connection", (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
-    socket.on("room:create", ({ name }, cb) => {
+    socket.on("room:create", ({ name, color }, cb) => {
       try {
-        const { code, playerId, token } = roomManager.createRoom(name);
+        const { code, playerId, token } = roomManager.createRoom(name, color);
         socketMeta.set(socket.id, { code, playerId });
         socket.join(roomChannel(code));
         socket.emit("session", { playerId, token, code });
@@ -71,10 +71,10 @@ app.prepare().then(() => {
       }
     });
 
-    socket.on("room:join", ({ code, name }, cb) => {
+    socket.on("room:join", ({ code, name, color }, cb) => {
       try {
         const upper = code.trim().toUpperCase();
-        const { playerId, token } = roomManager.joinRoom(upper, name);
+        const { playerId, token } = roomManager.joinRoom(upper, name, color);
         socketMeta.set(socket.id, { code: upper, playerId });
         socket.join(roomChannel(upper));
         socket.emit("session", { playerId, token, code: upper });

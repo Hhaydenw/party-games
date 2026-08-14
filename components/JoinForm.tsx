@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 import { useParty } from "@/lib/socketClient";
+import { AVATAR_COLORS } from "@/lib/avatarColors";
+import ColorPicker from "@/components/ColorPicker";
 
 export default function JoinForm({ code }: { code: string }) {
   const { joinRoom } = useParty();
   const [name, setName] = useState("");
+  const [color, setColor] = useState(AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]!);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +20,7 @@ export default function JoinForm({ code }: { code: string }) {
     }
     setBusy(true);
     setError(null);
-    const res = await joinRoom(code, name.trim());
+    const res = await joinRoom(code, name.trim(), color);
     setBusy(false);
     if (!res.ok) setError(res.error);
   }
@@ -38,6 +41,7 @@ export default function JoinForm({ code }: { code: string }) {
           maxLength={24}
           onChange={(e) => setName(e.target.value)}
         />
+        <ColorPicker value={color} onChange={setColor} />
         <button type="submit" className="btn-primary w-full" disabled={busy}>
           {busy ? "Joining…" : "Join room"}
         </button>

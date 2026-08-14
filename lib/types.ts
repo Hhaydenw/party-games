@@ -8,6 +8,10 @@ export interface PlayerInfo {
   connected: boolean;
   isHost: boolean;
   score: number;
+  // Hex color chosen at join time (or auto-assigned), used for avatar
+  // initials/dots throughout the UI so players are recognizable at a glance
+  // across the player list, team pickers, and per-game views.
+  color: string;
 }
 
 export type RoomStatus = "lobby" | "in-game" | "finished";
@@ -118,8 +122,8 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-  "room:create": (payload: { name: string }, cb: (res: { ok: true; code: string; playerId: PlayerId; token: string } | { ok: false; error: string }) => void) => void;
-  "room:join": (payload: { code: string; name: string }, cb: (res: { ok: true; playerId: PlayerId; token: string } | { ok: false; error: string }) => void) => void;
+  "room:create": (payload: { name: string; color?: string }, cb: (res: { ok: true; code: string; playerId: PlayerId; token: string } | { ok: false; error: string }) => void) => void;
+  "room:join": (payload: { code: string; name: string; color?: string }, cb: (res: { ok: true; playerId: PlayerId; token: string } | { ok: false; error: string }) => void) => void;
   "room:rejoin": (payload: { code: string; playerId: PlayerId; token: string }, cb: (res: { ok: true } | { ok: false; error: string }) => void) => void;
   "room:selectGame": (payload: { gameId: string }) => void;
   "room:setGameOptions": (payload: { options: GameOptions }) => void;

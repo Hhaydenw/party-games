@@ -7,6 +7,14 @@ import PlayerList from "@/components/PlayerList";
 import SoundSettingsButton from "@/components/SoundSettingsButton";
 import EmoteBar from "@/components/EmoteBar";
 
+// Games whose rounds run on a countdown that the client fires a "timeUp"
+// action for once it elapses — the host can nudge that along early instead
+// of waiting out a round that's dragging (e.g. everyone's clearly stuck).
+// Real-time tick-loop games (Tanks, Void Raiders, ...) and turn-based games
+// without a clock aren't in this list since a generic timeUp wouldn't mean
+// anything to them.
+const SKIPPABLE_GAMES = new Set(["trivia", "drawing", "family-feud", "name-that-tune", "wildest-answer", "price-check"]);
+
 export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
   const { gameView, sendAction, error, clearError, returnToLobby } = useParty();
 
@@ -24,6 +32,15 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
           </span>
           <EmoteBar />
           <SoundSettingsButton />
+          {me.isHost && room.gameId && SKIPPABLE_GAMES.has(room.gameId) && (
+            <button
+              className="btn-secondary px-3 py-1.5 text-sm"
+              title="Skip the current round's timer early"
+              onClick={() => sendAction({ type: "timeUp" })}
+            >
+              ⏭ Skip round
+            </button>
+          )}
           {me.isHost && (
             <button className="btn-secondary px-3 py-1.5 text-sm" onClick={returnToLobby}>
               End game

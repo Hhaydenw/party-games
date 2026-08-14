@@ -3,11 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useParty } from "@/lib/socketClient";
+import { AVATAR_COLORS } from "@/lib/avatarColors";
+import ColorPicker from "@/components/ColorPicker";
 
 export default function HomePage() {
   const router = useRouter();
   const { createRoom, connected } = useParty();
   const [name, setName] = useState("");
+  const [color, setColor] = useState(AVATAR_COLORS[0]!);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<"create" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +23,7 @@ export default function HomePage() {
     }
     setBusy("create");
     setError(null);
-    const res = await createRoom(name.trim());
+    const res = await createRoom(name.trim(), color);
     setBusy(null);
     if (res.ok) {
       router.push(`/room/${res.code}`);
@@ -57,6 +60,8 @@ export default function HomePage() {
           maxLength={24}
           onChange={(e) => setName(e.target.value)}
         />
+
+        <ColorPicker value={color} onChange={setColor} />
 
         <form onSubmit={handleCreate} className="mb-6">
           <button type="submit" className="btn-primary w-full" disabled={!connected || busy === "create"}>
