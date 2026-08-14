@@ -12,6 +12,12 @@ import { assignTeams } from "./teamAssign";
 // only one shell in flight per tank at a time (no rapid-fire spam — you
 // have to land or lose your shot before you can fire again), and one-hit
 // kills instead of a health bar.
+//
+// It also supports simple AI bot tanks (solo mode only) so it's actually
+// playable alone, same as the original's single-player mode against enemy
+// tanks — they wander the maze, aim at whoever's nearest with a clear shot,
+// and fire on their own, obeying the same one-shell-at-a-time rule players
+// do.
 
 export type TeamId = "solo" | "red" | "blue";
 
@@ -29,6 +35,12 @@ const MINE_ARM_MS = 700;
 const MINE_LIFETIME_MS = 15_000;
 const MINE_TRIGGER_RADIUS = 30;
 const MINE_BLAST_RADIUS = 70;
+const MAX_BOTS = 4;
+const MAX_COMBATANTS = 10; // humans + bots
+const BOT_SPEED_FACTOR = 0.6; // bots move a bit slower than players, for fairness
+const BOT_FIRE_RANGE = 620;
+const BOT_FIRE_CHANCE_PER_TICK = 0.06; // when a clean shot is lined up
+const BOT_NAMES = ["Rusty", "Sparky", "Ironclad", "Tinbot", "Clunker", "Bolt"];
 
 const SPAWN_POINTS: [number, number][] = [
   [80, 80],
@@ -120,6 +132,11 @@ interface TankPlayer {
   deaths: number;
   respawnAt: number | null;
   minesRemaining: number;
+  isBot: boolean;
+  botName: string | null;
+  botDirX: number;
+  botDirY: number;
+  botNextTurnAt: number;
 }
 
 interface Bullet {
@@ -178,6 +195,8 @@ export interface TanksView {
     deaths: number;
     minesRemaining: number;
     hasActiveShell: boolean;
+    isBot: boolean;
+    botName: string | null;
   }[];
   bullets: { id: string; team: TeamId; x: number; y: number }[];
   mines: { id: string; team: TeamId; x: number; y: number; armed: boolean }[];
@@ -214,6 +233,23 @@ function circleRectOverlap(px: number, py: number, radius: number, wall: Wall): 
   return distance(px, py, c.x, c.y) < radius;
 }
 
+// Coarse line-of-sight check for bot aiming: samples points along the
+// segment and blocks on any solid (indestructible) wall — destructible
+// walls are ignored so a bot will still take (and potentially crack open) a
+// shot through one, which reads as intentional rather than a bug.
+function wallBlocksLine(x1: number, y1: number, x2: number, y2: number, walls: Wall[]): boolean {
+  const steps = 20;
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = x1 + (x2 - x1) * t;
+    const y = y1 + (y2 - y1) * t;
+    for (const w of walls) {
+      if (!w.destructible && circleRectOverlap(x, y, 2, w)) return true;
+    }
+  }
+  return false;
+}
+
 // Slides a tank's attempted move along walls instead of just blocking it
 // outright — tries the full move, then x-only, then y-only.
 function resolveTankMove(px: number, py: number, nx: number, ny: number, radius: number, walls: Wall[]): { x: number; y: number } {
@@ -234,22 +270,33 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
     name: "Tank Arena",
     tagline: "Wii Play Tanks-style maze battle. WASD to move, mouse to aim/shoot, E to drop a mine.",
     category: "party",
-    minPlayers: 2,
+    minPlayers: 1,
     maxPlayers: 8,
     tickIntervalMs: 50,
     options: [
       { key: "mode", label: "Mode", type: "select", choices: [{ value: "solo", label: "Free-for-all" }, { value: "teams", label: "Teams" }], default: "solo" },
       { key: "minutes", label: "Match length (minutes)", type: "number", min: 1, max: 10, default: 3 },
+      { key: "bots", label: "AI bots (free-for-all only)", type: "number", min: 0, max: MAX_BOTS, default: 1 },
     ],
   },
   createInitialState(playersIn, options: GameOptions) {
     const host = playersIn.find((p) => p.isHost) ?? playersIn[0]!;
     const mode = options.mode === "teams" ? "teams" : "solo";
-    const order = playersIn.map((p) => p.id);
     const teamAssignment = mode === "teams" ? assignTeams(playersIn, options, ["red", "blue"] as const) : {};
+
+    // Bots only make sense in free-for-all (team balance/assignment gets
+    // complicated otherwise) and are the whole reason 1-player games work
+    // at all — if a lone human didn't ask for any, add one anyway so
+    // "minPlayers: 1" doesn't just mean driving around an empty maze.
+    const requestedBots = mode === "solo" ? Math.min(Math.max(Number(options.bots) || 0, 0), MAX_BOTS) : 0;
+    const botCount =
+      mode === "solo" ? Math.min(Math.max(requestedBots, playersIn.length < 2 ? 1 : 0), Math.max(0, MAX_COMBATANTS - playersIn.length)) : 0;
+
+    const order = [...playersIn.map((p) => p.id), ...Array.from({ length: botCount }, (_, i) => `bot${i + 1}`)];
     const players: Record<PlayerId, TankPlayer> = {};
     order.forEach((id, i) => {
       const [x, y] = pickSpawn(i);
+      const isBot = id.startsWith("bot");
       const team: TeamId = mode === "teams" ? teamAssignment[id]! : "solo";
       players[id] = {
         id,
@@ -263,6 +310,11 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
         deaths: 0,
         respawnAt: null,
         minesRemaining: MAX_MINES,
+        isBot,
+        botName: isBot ? (BOT_NAMES[i % BOT_NAMES.length] ?? "Bot") : null,
+        botDirX: 0,
+        botDirY: 0,
+        botNextTurnAt: 0,
       };
     });
     const minutes = Math.min(10, Math.max(1, Number(options.minutes) || 3));
@@ -276,7 +328,9 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
       walls: buildWalls(),
       phase: "playing",
       matchEndsAt: Date.now() + minutes * 60_000,
-      log: [`Battle begins! ${mode === "teams" ? "Team Red vs Team Blue" : "Free-for-all"}. One shell at a time, one hit kills!`],
+      log: [
+        `Battle begins! ${mode === "teams" ? "Team Red vs Team Blue" : "Free-for-all"}${botCount > 0 ? ` (${botCount} AI bot${botCount === 1 ? "" : "s"})` : ""}. One shell at a time, one hit kills!`,
+      ],
     };
   },
   applyAction(state, playerId, action) {
@@ -349,6 +403,10 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
         }
         continue;
       }
+      if (p.isBot) {
+        players[id] = p; // handled in the bot pass below, once every tank's base position is known
+        continue;
+      }
       let dx = 0;
       let dy = 0;
       if (p.input.up) dy -= 1;
@@ -364,6 +422,57 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
       const ny = p.y + dy * TANK_SPEED * dtSec;
       const { x, y } = resolveTankMove(p.x, p.y, nx, ny, TANK_RADIUS, state.walls);
       players[id] = { ...p, x, y };
+    }
+
+    // --- bots: wander the maze, aim at the nearest living enemy with a
+    // clear shot, and fire on their own (subject to the same one-shell-at-
+    // a-time rule players have).
+    const botBullets: Bullet[] = [];
+    for (const id of state.order) {
+      const p = players[id]!;
+      if (!p.isBot || !p.alive) continue;
+      let next = p;
+      if (now >= p.botNextTurnAt) {
+        const heading = Math.random() * Math.PI * 2;
+        next = { ...next, botDirX: Math.cos(heading), botDirY: Math.sin(heading), botNextTurnAt: now + 1000 + Math.random() * 1500 };
+      }
+      const nx = next.x + next.botDirX * TANK_SPEED * BOT_SPEED_FACTOR * dtSec;
+      const ny = next.y + next.botDirY * TANK_SPEED * BOT_SPEED_FACTOR * dtSec;
+      const moved = resolveTankMove(next.x, next.y, nx, ny, TANK_RADIUS, state.walls);
+      const stuck = Math.hypot(moved.x - next.x, moved.y - next.y) < 0.5;
+      next = { ...next, x: moved.x, y: moved.y, botNextTurnAt: stuck ? now : next.botNextTurnAt };
+
+      let target: TankPlayer | null = null;
+      let bestDist = Infinity;
+      for (const oid of state.order) {
+        if (oid === id) continue;
+        const o = players[oid]!;
+        if (!o.alive) continue;
+        if (state.mode === "teams" && o.team === next.team) continue;
+        const d = distance(next.x, next.y, o.x, o.y);
+        if (d < bestDist) {
+          bestDist = d;
+          target = o;
+        }
+      }
+      if (target) {
+        next = { ...next, angle: Math.atan2(target.y - next.y, target.x - next.x) };
+        const hasShell = state.bullets.some((b) => b.ownerId === id) || botBullets.some((b) => b.ownerId === id);
+        if (!hasShell && bestDist < BOT_FIRE_RANGE && !wallBlocksLine(next.x, next.y, target.x, target.y, state.walls) && Math.random() < BOT_FIRE_CHANCE_PER_TICK) {
+          botBullets.push({
+            id: nextId("b"),
+            ownerId: id,
+            team: next.team,
+            x: next.x + Math.cos(next.angle) * (TANK_RADIUS + 4),
+            y: next.y + Math.sin(next.angle) * (TANK_RADIUS + 4),
+            vx: Math.cos(next.angle) * BULLET_SPEED,
+            vy: Math.sin(next.angle) * BULLET_SPEED,
+            bounces: 0,
+            createdAt: now,
+          });
+        }
+      }
+      players[id] = next;
     }
 
     let walls = state.walls;
@@ -472,6 +581,10 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
       if (!hitTank) survivingBullets.push(bullet);
     }
 
+    // Freshly-fired bot shells join the pool unmoved this tick, same as a
+    // human's `shoot` action landing mid-tick — they start moving next tick.
+    survivingBullets.push(...botBullets);
+
     // --- mines: arm after a delay, trigger on tank proximity or being shot,
     // expire after their lifetime.
     const survivingMines: Mine[] = [];
@@ -536,6 +649,8 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
           deaths: p.deaths,
           minesRemaining: p.minesRemaining,
           hasActiveShell: state.bullets.some((b) => b.ownerId === id),
+          isBot: p.isBot,
+          botName: p.botName,
         };
       }),
       bullets: state.bullets.map((b) => ({ id: b.id, team: b.team, x: b.x, y: b.y })),

@@ -217,7 +217,16 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   them, and catch anyone nearby — including you, if you wander back onto
   your own. The maze layout was checked with a standalone reachability
   script (every spawn can always reach every other spawn, no wall sits
-  inside a spawn's safety zone) rather than eyeballed. Paddle Battle: a two-player
+  inside a spawn's safety zone) rather than eyeballed. **Playable solo**:
+  free-for-all supports 1 human plus 0–4 AI bots (a settings option); if a
+  lone player doesn't add any, one gets added automatically so "1 player"
+  never just means driving around an empty maze. Bots wander the maze,
+  aim at whichever tank (human or bot) is nearest with a clear shot, and
+  fire on their own — same one-shell-at-a-time rule as everyone else. Bots
+  aren't available in Teams mode (team-balancing a mix of humans and bots
+  adds complexity not worth it here), and a match a bot "wins" (highest
+  kills) doesn't award anyone a session win in the lobby, since bots aren't
+  real room players. Paddle Battle: a two-player
   Pong-style paddle-and-ball game, W/S or ↑/↓ to move, first to the target
   score wins — ball speed ramps up with each rally and the bounce angle
   depends on where it hits your paddle. Void Raiders: a Galaga/Space

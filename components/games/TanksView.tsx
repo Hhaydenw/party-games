@@ -25,7 +25,12 @@ export default function TanksView({
   const shootInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastSent = useRef("");
 
-  const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
+  const nameFor = (id: string) => {
+    if (id === meId) return "You";
+    const bot = view.players.find((p) => p.id === id && p.isBot);
+    if (bot) return `🤖 ${bot.botName ?? "Bot"}`;
+    return players.find((p) => p.id === id)?.name ?? "…";
+  };
   const colorFor = (p: ViewType["players"][number]) =>
     view.mode === "teams" ? TEAM_COLOR[p.team] ?? "#888" : SOLO_COLORS[view.players.findIndex((x) => x.id === p.id) % SOLO_COLORS.length]!;
 
