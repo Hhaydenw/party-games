@@ -342,7 +342,15 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   (`lib/games/streetSnapCities.ts`) with usually-decent coverage is used
   instead of a uniformly random point on Earth, and a round that can't find
   imagery near its first pick quietly retries a different spot/city rather
-  than starting somewhere empty. **Needs setup**: a free Mapillary access
+  than starting somewhere empty. Starting points are also filtered to
+  exclude fisheye-camera images — real-world testing found those can leave
+  mapillary-js's renderer stuck indefinitely (no error, it just never
+  signals the photo is ready), where standard perspective and true 360
+  photos both render reliably. That filter only applies to the round's
+  starting point, though — a player can still walk to a fisheye shot mid-
+  round via mapillary-js's own navigation, since the SDK doesn't expose a
+  way to pre-filter that; if a round ever seems stuck loading, the browser
+  console now logs specifically why. **Needs setup**: a free Mapillary access
   token (see below) — without one, the game fails to start with a clear
   message instead of a crash, and every other game keeps working normally.
   This is also the one feature in the whole app that couldn't be verified

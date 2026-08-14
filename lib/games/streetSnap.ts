@@ -61,10 +61,18 @@ export async function findRoundStart(
     const lng = city.lng + (Math.random() - 0.5) * city.spread;
     const bbox = [lng - BBOX_HALF_DEGREES, lat - BBOX_HALF_DEGREES, lng + BBOX_HALF_DEGREES, lat + BBOX_HALF_DEGREES].join(",");
     try {
-      const res = await fetchImpl(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=id&bbox=${bbox}&limit=20`);
+      const res = await fetchImpl(
+        `https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=id,camera_type&bbox=${bbox}&limit=20`
+      );
       if (!res.ok) continue;
-      const data = (await res.json()) as { data?: { id: string }[] };
-      const images = data.data ?? [];
+      const data = (await res.json()) as { data?: { id: string; camera_type?: string }[] };
+      // Fisheye-captured images (action-cam style, heavily distorted) can
+      // get mapillary-js's renderer stuck indefinitely — it never throws,
+      // it just never fires the events that signal the photo is ready to
+      // show. Standard perspective and true 360 (equirectangular/spherical)
+      // shots both render reliably, so only those are eligible starting
+      // points.
+      const images = (data.data ?? []).filter((img) => img.camera_type !== "fisheye");
       if (images.length >= MIN_IMAGES_FOR_A_GOOD_START) {
         const pick = images[Math.floor(Math.random() * images.length)]!;
         return { city, imageId: pick.id };
