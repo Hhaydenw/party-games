@@ -241,12 +241,17 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     }
   }
   function enterAiming() {
-    if (!ready || submittedRef.current || pendingCamera || aimingRef.current) return;
+    if (!ready || submittedRef.current || pendingCamera || aimingRef.current) {
+      console.log("[StreetSnap] enterAiming() blocked —", { ready, submitted: submittedRef.current, hasPending: Boolean(pendingCamera), alreadyAiming: aimingRef.current });
+      return;
+    }
+    console.log("[StreetSnap] entering aiming mode");
     setAiming(true);
     setClickToGo(false);
   }
   function exitAiming() {
     if (!aimingRef.current) return;
+    console.log("[StreetSnap] exiting aiming mode");
     setAiming(false);
     setClickToGo(true);
   }
@@ -432,14 +437,19 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         // before that internal handling ever runs, so they can't be
         // blocked that way. This is also almost certainly why the overlay
         // never appeared before — it was listening in the bubble phase.
-        onContextMenuCapture={(e) => e.preventDefault()}
+        onContextMenuCapture={(e) => {
+          console.log("[StreetSnap] contextmenu capture fired");
+          e.preventDefault();
+        }}
         onMouseDownCapture={(e) => {
+          console.log("[StreetSnap] mousedown capture fired, button =", e.button);
           if (e.button === 2) {
             e.preventDefault();
             enterAiming();
           }
         }}
         onMouseUpCapture={(e) => {
+          console.log("[StreetSnap] mouseup capture fired, button =", e.button);
           if (e.button === 2) exitAiming();
         }}
         onClickCapture={() => {
