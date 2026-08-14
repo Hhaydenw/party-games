@@ -35,7 +35,9 @@ export default function EmoteBar() {
 
   function react(emoji: string) {
     sendEmote(emoji);
-    setOpen(false);
+    // Deliberately doesn't close the panel — clicking outside is the only
+    // way to dismiss it, so someone can rapid-fire the same (or different)
+    // reaction without reopening the picker every time.
   }
 
   return (
