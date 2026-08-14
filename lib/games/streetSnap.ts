@@ -44,6 +44,34 @@ interface RoundStart {
   imageId: string;
 }
 
+function shuffle<T>(arr: T[]): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j] as T, a[i] as T];
+  }
+  return a;
+}
+
+// `mesh` (the 3D reconstruction geometry mapillary-js projects the photo
+// onto) isn't a field the bulk /images search endpoint will return — asking
+// for it there gets rejected outright — so it has to be checked per-image
+// against the single-image endpoint instead. Some crowd-sourced images only
+// ever got basic GPS-tagged processing and never got a mesh computed at
+// all; mapillary-js doesn't error on those, it just silently renders black
+// forever (confirmed via its own internal "Incorrect mesh URL" console
+// warning), so a missing mesh is just as disqualifying as a fisheye camera.
+async function hasMesh(imageId: string, token: string, fetchImpl: typeof fetch): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`https://graph.mapillary.com/${imageId}?access_token=${encodeURIComponent(token)}&fields=id,mesh`);
+    if (!res.ok) return false;
+    const data = (await res.json()) as { mesh?: { url?: string } };
+    return Boolean(data.mesh?.url);
+  } catch {
+    return false;
+  }
+}
+
 // Queries Mapillary's Graph API for images inside a small bounding box
 // around a jittered point within a random city, retrying with a different
 // city/point if that spot turns out to have no coverage. Exported (rather
@@ -67,14 +95,18 @@ export async function findRoundStart(
       if (!res.ok) continue;
       const data = (await res.json()) as { data?: { id: string; camera_type?: string }[] };
       // Fisheye-captured images (action-cam style, heavily distorted) can
-      // get mapillary-js's renderer stuck indefinitely — it never throws,
-      // it just never fires the events that signal the photo is ready to
-      // show. Standard perspective and true 360 (equirectangular/spherical)
-      // shots both render reliably, so only those are eligible starting
-      // points.
+      // also get mapillary-js's renderer stuck — standard perspective and
+      // true 360 (equirectangular/spherical) shots both render reliably.
       const images = (data.data ?? []).filter((img) => img.camera_type !== "fisheye");
-      if (images.length >= MIN_IMAGES_FOR_A_GOOD_START) {
-        const pick = images[Math.floor(Math.random() * images.length)]!;
+      if (images.length < MIN_IMAGES_FOR_A_GOOD_START) continue;
+
+      // Check a handful of candidates (in parallel) for an actual mesh
+      // before committing to one.
+      const candidates = shuffle(images).slice(0, 6);
+      const checked = await Promise.all(candidates.map(async (img) => ({ img, ok: await hasMesh(img.id, token, fetchImpl) })));
+      const withMesh = checked.filter((c) => c.ok).map((c) => c.img);
+      if (withMesh.length > 0) {
+        const pick = withMesh[Math.floor(Math.random() * withMesh.length)]!;
         return { city, imageId: pick.id };
       }
     } catch {
