@@ -358,7 +358,22 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   vote attribution** — not just a count, but who specifically has picked
   each photo so far, updating in real time as votes come in during voting
   itself rather than only being revealed once everyone's done. The same
-  grid is reused, read-only, for the round-end results screen. A curated list of
+  grid is reused, read-only, for the round-end results screen. There's also
+  a **camera-viewfinder mode**: right-click the street view to arm it (a
+  crosshair overlay appears and normal click-to-walk navigation is
+  suspended so a click can't do both at once), left-click to snap, right-
+  click again or Escape to cancel — purely additive, the always-visible
+  shutter button still works the normal way too. After snapping, there's a
+  **review step** before it's actually submitted: pick from a handful of
+  filter presets (grayscale, sepia, vintage, cool, warm, vivid, noir — CSS
+  filters, not canvas pixel manipulation) and drag-to-reposition/zoom-to-
+  crop the shot, or retake it entirely. Both are deliberately never baked
+  into an exported image file — they're stored as a few small numbers/an id
+  alongside the camera state and applied live via CSS every time the photo
+  is displayed (review, voting, results), keeping the same "never extract
+  the imagery" principle as the rest of the game, even though Google's
+  static images do have permissive-enough CORS headers that canvas-based
+  editing would have been technically possible. A curated list of
   ~25 major cities (`lib/games/streetSnapCities.ts`) is used instead of a
   uniformly random point on Earth, and a round that can't find coverage
   near its first pick quietly retries a different spot/city — though

@@ -50,6 +50,33 @@ function buildStaticStreetViewUrl(apiKey: string, camera: CameraState): string {
   return `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`;
 }
 
+// Post-capture "editing" is deliberately never baked into an exported
+// image — it's applied live via CSS every time the photo is displayed
+// (both in review and later in the voting/results grid), same as this
+// game's whole "never extract the imagery" approach. Google's static
+// images do have permissive CORS headers (confirmed live), so canvas-based
+// editing would technically be possible, but there's no need to actually
+// export/store pixels to deliver real filter/crop functionality.
+const FILTER_PRESETS = [
+  { id: "none", label: "Original", css: "" },
+  { id: "grayscale", label: "B&W", css: "grayscale(1)" },
+  { id: "sepia", label: "Sepia", css: "sepia(0.8)" },
+  { id: "vintage", label: "Vintage", css: "sepia(0.35) contrast(1.1) saturate(1.3) brightness(0.95)" },
+  { id: "cool", label: "Cool", css: "hue-rotate(15deg) saturate(1.1) brightness(1.05)" },
+  { id: "warm", label: "Warm", css: "sepia(0.2) saturate(1.3) brightness(1.05)" },
+  { id: "vivid", label: "Vivid", css: "saturate(1.6) contrast(1.15)" },
+  { id: "noir", label: "Noir", css: "grayscale(1) contrast(1.4) brightness(0.9)" },
+] as const;
+function filterCss(id?: string): string {
+  return FILTER_PRESETS.find((f) => f.id === id)?.css ?? "";
+}
+function cropTransform(camera: CameraState): string {
+  const x = camera.cropX ?? 50;
+  const y = camera.cropY ?? 50;
+  const scale = camera.cropScale ?? 1;
+  return `translate(${50 - x}%, ${50 - y}%) scale(${scale})`;
+}
+
 export default function StreetSnapView({
   view,
   onAction,
@@ -193,6 +220,38 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     };
   }, [view.startPano, view.mapsApiKey]);
 
+  // Camera-viewfinder overlay: right-click arms it (and suspends normal
+  // click-to-walk navigation, so a left click can't accidentally do both),
+  // left-click snaps, right-click again or Escape cancels. Purely additive
+  // — the always-visible shutter button below still works regardless.
+  const [aiming, setAiming] = useState(false);
+
+  function setClickToGo(enabled: boolean) {
+    try {
+      panoramaRef.current?.setOptions({ clickToGo: enabled });
+    } catch {
+      // ignore — panorama may not be constructed yet
+    }
+  }
+  function enterAiming() {
+    if (!ready || submittedRef.current || pendingCamera) return;
+    setAiming(true);
+    setClickToGo(false);
+  }
+  function exitAiming() {
+    setAiming(false);
+    setClickToGo(true);
+  }
+  useEffect(() => {
+    if (!aiming) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") exitAiming();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiming]);
+
   function captureCurrentCamera(): CameraState {
     const panorama = panoramaRef.current;
     if (!panorama) return { pano: view.startPano, heading: 0, pitch: 0, zoom: 1 };
@@ -200,15 +259,61 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     return { pano: panorama.getPano(), heading: pov.heading, pitch: pov.pitch, zoom: panorama.getZoom() ?? 1 };
   }
 
-  function takePhoto() {
-    if (submittedRef.current) return;
+  // Taking a photo stages it locally for review (filter/crop) rather than
+  // submitting immediately — nothing is sent to the server until "Submit
+  // photo" is pressed.
+  const [pendingCamera, setPendingCamera] = useState<CameraState | null>(null);
+  const [filterId, setFilterId] = useState("none");
+  const [cropPos, setCropPos] = useState({ x: 50, y: 50 });
+  const [cropScale, setCropScale] = useState(1);
+  const pendingRef = useRef<CameraState | null>(null);
+  pendingRef.current = pendingCamera;
+  const editRef = useRef({ filterId, cropPos, cropScale });
+  editRef.current = { filterId, cropPos, cropScale };
+
+  function startReview() {
+    if (submittedRef.current || pendingCamera) return;
     playSound("select");
-    onAction({ type: "submitPhoto", camera: captureCurrentCamera() });
+    setPendingCamera(captureCurrentCamera());
+    setFilterId("none");
+    setCropPos({ x: 50, y: 50 });
+    setCropScale(1);
+    if (aiming) exitAiming();
+  }
+  function retake() {
+    setPendingCamera(null);
+  }
+  function confirmSubmit() {
+    if (!pendingCamera) return;
+    playSound("select");
+    onAction({ type: "submitPhoto", camera: { ...pendingCamera, filter: filterId, cropX: cropPos.x, cropY: cropPos.y, cropScale } });
+    setPendingCamera(null);
   }
 
-  // Auto-submit whatever the player's currently framing if their own clock
-  // runs out without them clicking the shutter — better than losing their
-  // round entirely to an unlucky timeout.
+  const dragRef = useRef<{ startX: number; startY: number; startCropX: number; startCropY: number } | null>(null);
+  function startDrag(e: React.PointerEvent<HTMLDivElement>) {
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startCropX: cropPos.x, startCropY: cropPos.y };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onDrag(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pctX = ((e.clientX - dragRef.current.startX) / rect.width) * 100;
+    const pctY = ((e.clientY - dragRef.current.startY) / rect.height) * 100;
+    setCropPos({
+      x: Math.max(0, Math.min(100, dragRef.current.startCropX - pctX)),
+      y: Math.max(0, Math.min(100, dragRef.current.startCropY - pctY)),
+    });
+  }
+  function endDrag() {
+    dragRef.current = null;
+  }
+
+  // Auto-submit whatever the player's currently framing/reviewing if their
+  // own clock runs out without them confirming — better than losing their
+  // round entirely to an unlucky timeout. Uses whatever they'd staged for
+  // review (with its chosen filter/crop) if they got that far, else
+  // captures fresh from the live panorama with defaults.
   const autoSubmitted = useRef(false);
   useEffect(() => {
     autoSubmitted.current = false;
@@ -218,19 +323,95 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     const msLeft = view.exploreEndsAt - Date.now();
     if (msLeft <= 0) return;
     const t = setTimeout(() => {
-      if (!submittedRef.current && !autoSubmitted.current) {
-        autoSubmitted.current = true;
-        takePhoto();
-      }
+      if (submittedRef.current || autoSubmitted.current) return;
+      autoSubmitted.current = true;
+      const base = pendingRef.current ?? captureCurrentCamera();
+      const { filterId: f, cropPos: c, cropScale: s } = editRef.current;
+      onAction({ type: "submitPhoto", camera: { ...base, filter: f, cropX: c.x, cropY: c.y, cropScale: s } });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, msLeft + 50);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.exploreEndsAt]);
 
+  if (view.yourPhotoSubmitted) {
+    return <p className="text-sm text-emerald-400">📸 Photo taken! Waiting on {view.totalPlayers - view.submittedCount} more…</p>;
+  }
+
+  if (pendingCamera) {
+    return (
+      <div className="flex w-full max-w-3xl flex-col items-center gap-3">
+        <p className="text-sm font-semibold text-gold">Review your photo</p>
+        <div
+          className="relative aspect-video w-full touch-none overflow-hidden rounded-2xl border border-white/10 bg-black"
+          style={{ cursor: cropScale > 1 ? "grab" : "default" }}
+          onPointerDown={startDrag}
+          onPointerMove={onDrag}
+          onPointerUp={endDrag}
+          onPointerLeave={endDrag}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={buildStaticStreetViewUrl(view.mapsApiKey, pendingCamera)}
+            alt="Your photo"
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
+            style={{
+              filter: filterCss(filterId),
+              transform: `translate(${50 - cropPos.x}%, ${50 - cropPos.y}%) scale(${cropScale})`,
+            }}
+          />
+        </div>
+        <label className="flex w-full max-w-xs items-center gap-2 text-xs text-slate-400">
+          🔍
+          <input
+            type="range"
+            min={100}
+            max={220}
+            value={cropScale * 100}
+            onChange={(e) => setCropScale(Number(e.target.value) / 100)}
+            className="flex-1 accent-accent"
+          />
+        </label>
+        {cropScale > 1 && <p className="text-xs text-slate-500">Drag the photo to reposition it</p>}
+        <div className="flex flex-wrap justify-center gap-1.5">
+          {FILTER_PRESETS.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilterId(f.id)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                filterId === f.id ? "bg-gold text-ink" : "bg-white/10 text-slate-300 hover:bg-white/20"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-3">
+          <button className="btn-secondary" onClick={retake}>
+            ↺ Retake
+          </button>
+          <button className="btn-gold" onClick={confirmSubmit}>
+            ✓ Submit photo
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex w-full max-w-3xl flex-col items-center gap-3">
-      <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
+      <div
+        className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (aiming) exitAiming();
+          else enterAiming();
+        }}
+        onClick={() => {
+          if (aiming) startReview();
+        }}
+      >
         <div ref={containerRef} className="absolute inset-0" />
         {!ready && !loadError && (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Loading street imagery…</div>
@@ -240,15 +421,28 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
             Couldn't load the street view: {loadError}
           </div>
         )}
+        {aiming && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="absolute inset-6 rounded-lg border-2 border-white/30" />
+            <div className="relative h-20 w-20">
+              <div className="absolute inset-0 rounded-full border-2 border-white/80" />
+              <div className="absolute left-1/2 top-0 h-3 w-0.5 -translate-x-1/2 bg-white/80" />
+              <div className="absolute bottom-0 left-1/2 h-3 w-0.5 -translate-x-1/2 bg-white/80" />
+              <div className="absolute left-0 top-1/2 h-0.5 w-3 -translate-y-1/2 bg-white/80" />
+              <div className="absolute right-0 top-1/2 h-0.5 w-3 -translate-y-1/2 bg-white/80" />
+            </div>
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white">
+              Click to snap 📸 · Right-click to cancel
+            </div>
+          </div>
+        )}
       </div>
-      <p className="text-xs text-slate-500">Drag to look around, click the arrows on the ground to walk. © Google Street View.</p>
-      {view.yourPhotoSubmitted ? (
-        <p className="text-sm text-emerald-400">📸 Photo taken! Waiting on {view.totalPlayers - view.submittedCount} more…</p>
-      ) : (
-        <button className="btn-gold text-lg" onClick={takePhoto} disabled={!ready}>
-          📸 Take this photo
-        </button>
-      )}
+      <p className="text-xs text-slate-500">
+        Drag to look around, click the arrows on the ground to walk — or right-click to aim, left-click to snap. © Google Street View.
+      </p>
+      <button className="btn-gold text-lg" onClick={startReview} disabled={!ready}>
+        📸 Take this photo
+      </button>
     </div>
   );
 }
@@ -345,6 +539,7 @@ function PhotoTile({
             src={buildStaticStreetViewUrl(apiKey, camera)}
             alt={`Photo by ${label}`}
             className="absolute inset-0 h-full w-full object-cover"
+            style={{ filter: filterCss(camera.filter), transform: cropTransform(camera) }}
             onLoad={() => setLoaded(true)}
           />
         )}
