@@ -13,7 +13,7 @@ import EmoteBar from "@/components/EmoteBar";
 // Real-time tick-loop games (Tanks, Void Raiders, ...) and turn-based games
 // without a clock aren't in this list since a generic timeUp wouldn't mean
 // anything to them.
-const SKIPPABLE_GAMES = new Set(["trivia", "drawing", "family-feud", "name-that-tune", "wildest-answer", "price-check", "category-dash", "word-grid"]);
+const SKIPPABLE_GAMES = new Set(["trivia", "drawing", "family-feud", "name-that-tune", "wildest-answer", "price-check", "category-dash", "word-grid", "color-match"]);
 
 export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
   const { gameView, sendAction, error, clearError, returnToLobby } = useParty();

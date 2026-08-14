@@ -7,7 +7,7 @@ invite link, everyone picks a display name, and you play together in real time.
 
 The platform (rooms, invite links, display names, lobby, reconnect) is built so
 new games drop in as self-contained plugins without touching anything else.
-Fourteen games are fully implemented:
+Fifteen games are fully implemented:
 
 | Game | Category | Players |
 |---|---|---|
@@ -21,6 +21,7 @@ Fourteen games are fully implemented:
 | **Price Check** (Price Is Right-style) | 📱 Party | 2–12 |
 | **Lucky Spin** (Wheel of Fortune-style) | 📱 Party | 2–6 |
 | **Word Grid** (Scrabble-style) | 🎲 Board | 2–4 |
+| **Color Match** | 📱 Party | 2–12 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
 | **Paddle Battle** (Pong-style) | 📱 Party (real-time) | 2 |
 | **The Game of Life** | 🎲 Board | 2–6 |
@@ -309,6 +310,15 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   (and, if someone went out, gets added to theirs). Known simplification:
   no separate "challenge a played word" step after the fact — only the
   placement is validated, live, before it's accepted.
+- **Color Match** is an original color-memory game (not affiliated with
+  dialed.gg or any other commercial game): a target color flashes on
+  screen, then hides — everyone dials in R/G/B sliders from memory to
+  recreate it, and scores 0-10 (10 = perfect) once revealed. The score
+  isn't raw RGB distance — it's converted to [CIELAB](https://en.wikipedia.org/wiki/CIELAB_color_space)
+  first (`lib/games/colorMatch.ts`) and scored by *perceptual* closeness,
+  since RGB distance alone judges some very-different-looking colors as
+  deceptively "close." Colors are randomized in HSL space (not raw RGB) so
+  rounds land on distinguishable colors instead of muddy near-greys.
 
 ### Family Feud content note
 
