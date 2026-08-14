@@ -25,8 +25,11 @@ interface BoardCell {
   letter: string;
   value: number;
   isBlank: boolean;
+  placedBy: PlayerId;
 }
 type Board = (BoardCell | null)[][];
+
+const TURN_MS = 120_000; // 2 minutes per turn; running out auto-passes
 
 interface RackTile {
   id: string;
@@ -79,6 +82,7 @@ export interface WordGridState {
   racks: Record<PlayerId, RackTile[]>;
   scores: Record<PlayerId, number>;
   turnIndex: number;
+  turnEndsAt: number | null;
   passStreak: number;
   phase: WordGridPhase;
   log: string[];
@@ -90,6 +94,7 @@ export interface BoardCellView {
   letter: string;
   value: number;
   isBlank: boolean;
+  placedBy: PlayerId;
 }
 
 export interface WordGridView {
@@ -100,6 +105,7 @@ export interface WordGridView {
   bagCount: number;
   turnPlayerId: PlayerId;
   isYourTurn: boolean;
+  turnEndsAt: number | null;
   scores: { playerId: PlayerId; score: number }[];
   phase: WordGridPhase;
   log: string[];
@@ -114,7 +120,8 @@ export type WordGridPlacement = { row: number; col: number; tileId: string; lett
 export type WordGridAction =
   | { type: "place"; placements: WordGridPlacement[] }
   | { type: "exchange"; tileIds: string[] }
-  | { type: "pass" };
+  | { type: "pass" }
+  | { type: "timeUp" };
 
 function tileValueSum(rack: RackTile[]): number {
   return rack.reduce((sum, t) => sum + t.value, 0);
@@ -147,7 +154,12 @@ function isFirstMoveEmpty(board: Board): boolean {
 // Validates a set of tile placements against the current board and, if
 // legal, returns the resulting board plus every newly-formed word and its
 // score. Never mutates the board/rack passed in.
-async function attemptPlacement(board: Board, rack: RackTile[], placements: WordGridPlacement[]): Promise<PlacementResult | PlacementError> {
+async function attemptPlacement(
+  board: Board,
+  rack: RackTile[],
+  placements: WordGridPlacement[],
+  playerId: PlayerId
+): Promise<PlacementResult | PlacementError> {
   if (placements.length === 0) return { ok: false, error: "Place at least one tile." };
 
   const seenCells = new Set<string>();
@@ -191,7 +203,7 @@ async function attemptPlacement(board: Board, rack: RackTile[], placements: Word
   const newCellKeys = new Set<string>();
   placements.forEach((p, i) => {
     const tile = usedTiles[i]!;
-    merged[p.row]![p.col] = { letter: tile.letter, value: tile.value, isBlank: tile.isBlank };
+    merged[p.row]![p.col] = { letter: tile.letter, value: tile.value, isBlank: tile.isBlank, placedBy: playerId };
     newCellKeys.add(`${p.row},${p.col}`);
   });
 
@@ -319,7 +331,7 @@ function endGame(state: WordGridState, emptyRackPlayerId: PlayerId | null): Word
       scores[pid] = (scores[pid] ?? 0) - tileValueSum(state.racks[pid] ?? []);
     }
   }
-  return { ...state, phase: "finished", scores, finishedByEmptyRack: emptyRackPlayerId };
+  return { ...state, phase: "finished", scores, finishedByEmptyRack: emptyRackPlayerId, turnEndsAt: null };
 }
 
 export const wordGrid: GameDefinition<WordGridState, WordGridView, WordGridAction> = {
@@ -351,6 +363,7 @@ export const wordGrid: GameDefinition<WordGridState, WordGridView, WordGridActio
       racks,
       scores,
       turnIndex: 0,
+      turnEndsAt: Date.now() + TURN_MS,
       passStreak: 0,
       phase: "playing",
       log: [`${players[0]?.name ?? "Someone"} goes first — cover the center square to open the game!`],
@@ -360,6 +373,21 @@ export const wordGrid: GameDefinition<WordGridState, WordGridView, WordGridActio
   },
   async applyAction(state, playerId, action) {
     if (state.phase !== "playing") throw new GameActionError("Game is already over.");
+
+    // Unlike the other actions, timeUp isn't restricted to whoever's turn
+    // it is — any connected client can report the deadline passing (the
+    // same pattern the timer-based party games use), and it auto-passes
+    // for whoever's actually up rather than requiring their own client to
+    // be the one to notice.
+    if (action.type === "timeUp") {
+      const current = state.playerIds[state.turnIndex]!;
+      const passStreak = state.passStreak + 1;
+      const log = [...state.log, `${current} ran out of time and was passed.`].slice(-30);
+      let next: WordGridState = { ...state, passStreak, log, turnIndex: nextTurn(state), turnEndsAt: Date.now() + TURN_MS };
+      if (passStreak >= state.playerIds.length) next = endGame(next, null);
+      return next;
+    }
+
     if (state.playerIds[state.turnIndex] !== playerId) throw new GameActionError("Not your turn.");
     const rack = state.racks[playerId] ?? [];
     // Log lines embed the raw player id (state has no access to display
@@ -367,7 +395,7 @@ export const wordGrid: GameDefinition<WordGridState, WordGridView, WordGridActio
     // readable log, since names live on the room's player list, not state.
 
     if (action.type === "place") {
-      const result = await attemptPlacement(state.board, rack, action.placements);
+      const result = await attemptPlacement(state.board, rack, action.placements, playerId);
       if (!result.ok) throw new GameActionError(result.error);
       const usedIds = new Set(action.placements.map((p) => p.tileId));
       const remainingRack = rack.filter((t) => !usedIds.has(t.id));
@@ -387,6 +415,7 @@ export const wordGrid: GameDefinition<WordGridState, WordGridView, WordGridActio
         passStreak: 0,
         log,
         turnIndex: nextTurn(state),
+        turnEndsAt: Date.now() + TURN_MS,
       };
       if (newRack.length === 0 && bag.length === 0) {
         next = endGame(next, playerId);
@@ -406,13 +435,13 @@ export const wordGrid: GameDefinition<WordGridState, WordGridView, WordGridActio
       const { drawn, bag } = draw(bagWithReturns, toExchange.length);
       const racks = { ...state.racks, [playerId]: [...keep, ...drawn] };
       const log = [...state.log, `${playerId} exchanged ${toExchange.length} tile${toExchange.length === 1 ? "" : "s"}.`].slice(-30);
-      return { ...state, racks, bag, passStreak: 0, log, turnIndex: nextTurn(state) };
+      return { ...state, racks, bag, passStreak: 0, log, turnIndex: nextTurn(state), turnEndsAt: Date.now() + TURN_MS };
     }
 
     if (action.type === "pass") {
       const passStreak = state.passStreak + 1;
       const log = [...state.log, `${playerId} passed.`].slice(-30);
-      let next: WordGridState = { ...state, passStreak, log, turnIndex: nextTurn(state) };
+      let next: WordGridState = { ...state, passStreak, log, turnIndex: nextTurn(state), turnEndsAt: Date.now() + TURN_MS };
       if (passStreak >= state.playerIds.length) next = endGame(next, null);
       return next;
     }
@@ -421,7 +450,9 @@ export const wordGrid: GameDefinition<WordGridState, WordGridView, WordGridActio
   },
   getPlayerView(state, playerId, players) {
     const nameOf = (pid: PlayerId) => players.find((p) => p.id === pid)?.name ?? pid;
-    const boardView: (BoardCellView | null)[][] = state.board.map((row) => row.map((c) => (c ? { letter: c.letter, value: c.value, isBlank: c.isBlank } : null)));
+    const boardView: (BoardCellView | null)[][] = state.board.map((row) =>
+      row.map((c) => (c ? { letter: c.letter, value: c.value, isBlank: c.isBlank, placedBy: c.placedBy } : null))
+    );
     // Turn-log entries reference raw player ids; resolve them to names here
     // rather than baking names into state (state has no access to display
     // names, only the room's player list does, and names can change).
@@ -438,6 +469,7 @@ export const wordGrid: GameDefinition<WordGridState, WordGridView, WordGridActio
       bagCount: state.bag.length,
       turnPlayerId: state.playerIds[state.turnIndex]!,
       isYourTurn: state.playerIds[state.turnIndex] === playerId,
+      turnEndsAt: state.turnEndsAt,
       scores: state.playerIds.map((pid) => ({ playerId: pid, score: state.scores[pid] ?? 0 })),
       phase: state.phase,
       log: readableLog,

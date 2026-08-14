@@ -21,7 +21,8 @@ export type SoundName =
   | "shoot"
   | "explosion"
   | "hit"
-  | "turn";
+  | "turn"
+  | "tilePlace";
 
 interface SoundSettings {
   muted: boolean;
@@ -159,6 +160,12 @@ const RECIPES: Record<SoundName, (ac: AudioContext, out: GainNode, t0: number) =
   },
   hit: (ac, out, t0) => tone(ac, out, 220, t0, 0.08, { type: "square", peak: 0.2, sweepTo: 80 }),
   turn: (ac, out, t0) => tone(ac, out, 600, t0, 0.09, { type: "sine", peak: 0.18, sweepTo: 750 }),
+  // A short, heavily-lowpassed "clack" — meant to read as a wooden tile
+  // being set down on a board, not a card or button click.
+  tilePlace: (ac, out, t0) => {
+    noiseBurst(ac, out, t0, 0.04, { peak: 0.22, lowpass: 1800 });
+    tone(ac, out, 180, t0, 0.05, { type: "triangle", peak: 0.15, sweepTo: 90 });
+  },
 };
 
 // Lobby ambient pad: a few slow, detuned sine drones with a gentle LFO on

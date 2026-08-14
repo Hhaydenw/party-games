@@ -119,6 +119,12 @@ export interface ServerToClientEvents {
   // why they were bounced back to the join screen, distinct from a normal
   // disconnect/room-closed case.
   "room:kicked": (payload: { reason: string }) => void;
+  // Ephemeral "here's where I'm about to place a tile" hint for Word Grid —
+  // cell coordinates only, never the letter, and never stored in game
+  // state; purely a live courtesy so opponents can see activity happening
+  // during someone's turn instead of a board that looks frozen until they
+  // commit.
+  "game:tilePreview": (payload: { playerId: PlayerId; cells: { row: number; col: number }[] }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -137,4 +143,5 @@ export interface ClientToServerEvents {
   "game:action": (payload: { action: unknown }) => void;
   "chat:send": (payload: { text: string }) => void;
   "room:emote": (payload: { emoji: string }) => void;
+  "game:tilePreview": (payload: { cells: { row: number; col: number }[] }) => void;
 }

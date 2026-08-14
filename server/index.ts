@@ -214,6 +214,19 @@ app.prepare().then(() => {
       io.to(roomChannel(meta.code)).emit("room:emote", { playerId: meta.playerId, name: player.name, emoji, at: Date.now() });
     });
 
+    socket.on("game:tilePreview", ({ cells }) => {
+      const meta = socketMeta.get(socket.id);
+      if (!meta) return;
+      // Cheap sanity bounds so a malformed/malicious payload can't spam
+      // absurd data through — this is a pure UI courtesy, never trusted for
+      // anything authoritative, so validation just needs to keep it sane.
+      if (!Array.isArray(cells) || cells.length > 7) return;
+      const clean = cells
+        .filter((c) => c && Number.isInteger(c.row) && Number.isInteger(c.col) && c.row >= 0 && c.row < 15 && c.col >= 0 && c.col < 15)
+        .slice(0, 7);
+      socket.to(roomChannel(meta.code)).emit("game:tilePreview", { playerId: meta.playerId, cells: clean });
+    });
+
     socket.on("room:returnToLobby", () => {
       const meta = socketMeta.get(socket.id);
       if (!meta) return;

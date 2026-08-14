@@ -74,6 +74,14 @@ interface Ctx {
   sendAction: (action: unknown) => void;
   sendChat: (text: string) => void;
   sendEmote: (emoji: string) => void;
+  // Latest Word Grid tile-preview cells per player, cell coordinates only —
+  // see `game:tilePreview`'s doc comment in lib/types.ts. Keyed by
+  // playerId; consumers should only trust the entry for whoever's actual
+  // turn it currently is (a stale entry for anyone else just never gets
+  // cleared, since there's nothing to clear it *to* — no one but the
+  // active player can legitimately be staging placements).
+  tilePreviews: Record<PlayerId, { row: number; col: number }[]>;
+  sendTilePreview: (cells: { row: number; col: number }[]) => void;
   currentPlayerId: string | null;
 }
 
@@ -88,6 +96,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [emotes, setEmotes] = useState<EmoteEvent[]>([]);
   const [kickedReason, setKickedReason] = useState<string | null>(null);
+  const [tilePreviews, setTilePreviews] = useState<Record<string, { row: number; col: number }[]>>({});
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const currentCodeRef = useRef<string | null>(null);
 
@@ -109,6 +118,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       emoteSeq += 1;
       const event: EmoteEvent = { id: `e${emoteSeq}`, ...payload };
       setEmotes((prev) => [...prev.slice(-19), event]);
+    });
+    socket.on("game:tilePreview", ({ playerId, cells }) => {
+      setTilePreviews((prev) => ({ ...prev, [playerId]: cells }));
     });
     socket.on("room:kicked", ({ reason }) => {
       if (currentCodeRef.current) clearSession(currentCodeRef.current);
@@ -180,6 +192,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const sendAction = useCallback((action: unknown) => socketRef.current?.emit("game:action", { action }), []);
   const sendChat = useCallback((text: string) => socketRef.current?.emit("chat:send", { text }), []);
   const sendEmote = useCallback((emoji: string) => socketRef.current?.emit("room:emote", { emoji }), []);
+  const sendTilePreview = useCallback((cells: { row: number; col: number }[]) => socketRef.current?.emit("game:tilePreview", { cells }), []);
   const clearError = useCallback(() => setError(null), []);
 
   const value = useMemo<Ctx>(
@@ -207,6 +220,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       sendAction,
       sendChat,
       sendEmote,
+      tilePreviews,
+      sendTilePreview,
       currentPlayerId,
     }),
     [
@@ -233,6 +248,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       sendAction,
       sendChat,
       sendEmote,
+      tilePreviews,
+      sendTilePreview,
       currentPlayerId,
     ]
   );

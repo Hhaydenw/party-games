@@ -276,20 +276,34 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   layout and tile point values, not a copy of any specific commercial game's
   exact grid (see `lib/games/wordGridBoard.ts`). Take turns laying tiles
   from your 7-letter rack across the shared 15x15 board to spell words
-  crossword-style; double/triple letter and word squares multiply your
-  score, using your whole rack in one turn earns a 50-point bonus, and the
-  first play must cover the center square. Word validity is checked against
-  a bundled public-domain word list (the ENABLE word list — see
-  `lib/games/data/wordlist.LICENSE.txt`) rather than a live API, so a round
-  never depends on an external dictionary service staying up; it's loaded
-  via a dynamic import server-side only, so the ~1.6MB word list never gets
-  shipped to anyone's browser. The game ends when someone empties their rack
-  with an empty bag, or everyone passes in a row — either way, everyone's
-  leftover rack value counts against their score (and, if someone went out,
-  gets added to theirs). Known simplifications: no separate "challenge a
-  played word" step after the fact (only the placement is validated, live,
-  before it's accepted) and turn timers aren't enforced — it's pass-when-
-  ready, same as most turn-based games here.
+  crossword-style — **drag a tile onto the board, or tap one then tap a
+  square** — double/triple letter and word squares multiply your score,
+  using your whole rack in one turn earns a 50-point bonus, and the first
+  play must cover the center square. Each tile is tinted with the color of
+  whoever played it (the same avatar color shown everywhere else), the
+  board has a wood-grain frame and wooden rack tiles instead of a flat
+  navy grid, and placing a tile plays a short "clack" sound. **Click any
+  already-played letter** to see the word(s) it's part of and look up a
+  real definition (via the free, keyless
+  [dictionaryapi.dev](https://api.dictionaryapi.dev)). While it's your
+  turn, opponents see a live, letter-free hint of *where* you're about to
+  place tiles (an outline on the empty squares, never what's actually on
+  them) via a small ephemeral relay — never stored, purely a "something's
+  happening" courtesy so the board doesn't look frozen mid-turn. Each turn
+  has a **2-minute clock**; running out auto-passes that turn (any
+  connected client can report the deadline passing, not just the current
+  player's own, so a dropped connection can't stall the game — the host
+  also has a manual **⏭ Skip round** override in the header). Word validity
+  is checked against a bundled public-domain word list (the ENABLE word
+  list — see `lib/games/data/wordlist.LICENSE.txt`) rather than a live API,
+  so a round never depends on an external dictionary service staying up;
+  it's loaded via a dynamic import server-side only, so the ~1.6MB word
+  list never gets shipped to anyone's browser. The game ends when someone
+  empties their rack with an empty bag, or everyone passes in a row —
+  either way, everyone's leftover rack value counts against their score
+  (and, if someone went out, gets added to theirs). Known simplification:
+  no separate "challenge a played word" step after the fact — only the
+  placement is validated, live, before it's accepted.
 
 ### Family Feud content note
 
