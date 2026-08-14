@@ -15,6 +15,35 @@ import { playSound } from "@/lib/sound";
 // a real MAPILLARY_TOKEN. The integration below is written against
 // mapillary-js's documented/shipped TypeScript API, but treat it as needing
 // a first real run-through before trusting it blind.
+//
+// One real issue this surfaced: MapillaryJS measures its container's size
+// at construction time to size its WebGL viewport, but React/flexbox/
+// aspect-ratio layouts don't always have their final size committed to the
+// DOM on the exact tick the viewer is constructed — the viewer can end up
+// rendering into a 0x0 (or stale) viewport, which shows as a solid black
+// box even though data loaded successfully. `attachResizeObserver` below
+// forces a re-measure on the next animation frame and on any subsequent
+// container resize, which is the fix.
+function attachResizeObserver(container: HTMLElement, viewer: ViewerType): () => void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        viewer.resize();
+      } catch {
+        // ignore — viewer may already be torn down
+      }
+    });
+  });
+  const observer = new ResizeObserver(() => {
+    try {
+      viewer.resize();
+    } catch {
+      // ignore
+    }
+  });
+  observer.observe(container);
+  return () => observer.disconnect();
+}
 
 export default function StreetSnapView({
   view,
@@ -128,9 +157,17 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
 
   useEffect(() => {
     let cancelled = false;
+    let detachResize: (() => void) | null = null;
     setReady(false);
     setLoadError(null);
     currentImageIdRef.current = view.startImageId;
+
+    // If nothing has loaded after a while, surface that instead of leaving
+    // an unexplained black box on screen — most likely causes are a bad/
+    // scoped-wrong token or no network access to Mapillary's CDN.
+    const stallTimer = setTimeout(() => {
+      if (!cancelled) setLoadError((prev) => prev ?? "Still loading after 12s — check the browser console, and that your Mapillary token is valid.");
+    }, 12_000);
 
     (async () => {
       try {
@@ -140,8 +177,14 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         viewer.on("image", (e) => {
           currentImageIdRef.current = e.image.id;
         });
+        viewer.on("load", () => {
+          if (cancelled) return;
+          clearTimeout(stallTimer);
+          setReady(true);
+          setLoadError(null);
+        });
+        detachResize = attachResizeObserver(containerRef.current, viewer);
         viewerRef.current = viewer;
-        setReady(true);
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Couldn't load street imagery.");
       }
@@ -149,6 +192,8 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
 
     return () => {
       cancelled = true;
+      clearTimeout(stallTimer);
+      detachResize?.();
       try {
         viewerRef.current?.remove();
       } catch {
@@ -244,6 +289,7 @@ function VotingPanel({
 
   useEffect(() => {
     let cancelled = false;
+    let detachResize: (() => void) | null = null;
     setReady(false);
     if (!current) return;
     (async () => {
@@ -259,6 +305,7 @@ function VotingPanel({
           } catch {
             // best-effort — worst case the framing isn't restored exactly
           }
+          setReady(true);
         });
         // Read-only: no walking/looking around someone else's shot, just
         // display it as they framed it. Attribution stays on, since this is
@@ -270,8 +317,8 @@ function VotingPanel({
             // ignore if a given component name isn't available
           }
         }
+        detachResize = attachResizeObserver(containerRef.current, viewer);
         viewerRef.current = viewer;
-        setReady(true);
       } catch {
         // leave `ready` false — panel shows a loading state indefinitely,
         // which is an acceptable degraded state for a single photo
@@ -279,6 +326,7 @@ function VotingPanel({
     })();
     return () => {
       cancelled = true;
+      detachResize?.();
       try {
         viewerRef.current?.remove();
       } catch {
