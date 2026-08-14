@@ -2,84 +2,57 @@ import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/ty
 import { substituteNames } from "@/lib/games/logNames";
 import { CITIES, CityDef } from "@/lib/games/streetSnapCities";
 
-// A GeoGuessr-style "take a photo" party game, built on Mapillary's free
-// crowd-sourced street-level imagery (https://www.mapillary.com) rather
-// than Google Street View — Mapillary requires only a free access token
-// (no billing account), and its imagery is contributor-licensed for this
-// kind of interactive display use.
+// A GeoGuessr-style "take a photo" party game, built on the Google Maps
+// JavaScript API's Street View panorama viewer.
 //
 // Everyone lands at the same starting point in a random city and freely
-// explores (via the mapillary-js viewer, client-side) for a few minutes.
-// Each player "takes" exactly one photo by locking in their current framing
-// — but critically, a "photo" here is just the *camera state* (which image,
-// which direction/zoom they were looking), not an extracted/downloaded
-// image file. At voting time, everyone's photo is re-rendered live by
-// pointing a fresh viewer at that saved state. This sidesteps two real
-// problems with literally screenshotting the imagery: browsers block
-// `canvas.toDataURL()` on cross-origin tiles served without permissive CORS
-// headers (which is the common case), and extracting/storing imagery
-// outside the provider's own viewer risks violating their terms of use —
-// replaying a saved camera state avoids both, since nothing is ever
-// exported, only redisplayed through Mapillary's own viewer.
+// explores (via `google.maps.StreetViewPanorama`, client-side) for a few
+// minutes. Each player "takes" exactly one photo by locking in their
+// current framing — but critically, a "photo" here is just the *camera
+// state* (which panorama, which heading/pitch/zoom they were looking at),
+// not an extracted/downloaded image file. At voting time, everyone's photo
+// is re-rendered live by pointing a fresh, read-only panorama viewer at
+// that saved state. This sidesteps two real problems with literally
+// screenshotting the imagery: browsers block `canvas.toDataURL()` on
+// cross-origin tiles served without permissive CORS headers (true of
+// Street View's tiles), and extracting/storing imagery outside the
+// provider's own viewer risks violating Google's terms of use — replaying
+// a saved camera state avoids both, since nothing is ever exported, only
+// redisplayed through Google's own viewer, exactly like normal Street View
+// embedding.
 //
-// Requires a MAPILLARY_TOKEN environment variable (a free client access
-// token from https://www.mapillary.com/dashboard/developers) — without
-// one, the game fails to start with a clear error rather than a crash.
+// Requires a GOOGLE_MAPS_API_KEY environment variable — a Google Cloud API
+// key with the "Maps JavaScript API" and "Street View Static API" enabled
+// (needs a billing account, but comfortably within free monthly usage for
+// a party app; metadata lookups specifically are not billed at all). Without
+// a key, the game fails to start with a clear error rather than a crash.
 
 const EXPLORE_MS_DEFAULT = 180_000; // 3 minutes
 const VOTE_MS_DEFAULT = 45_000;
 const DEFAULT_ROUNDS = 3;
-const BBOX_HALF_DEGREES = 0.004; // keeps the query bbox comfortably under Mapillary's 0.01deg-square limit
-const MIN_IMAGES_FOR_A_GOOD_START = 3;
+const SEARCH_RADIUS_METERS = 500; // how far from the jittered point to look for a real panorama
 const MAX_CITY_ATTEMPTS = 8;
 
 export interface CameraState {
-  imageId: string;
-  center: [number, number]; // mapillary-js "basic" image coordinates, [0,1] range
+  pano: string;
+  heading: number;
+  pitch: number;
   zoom: number;
 }
 
 interface RoundStart {
   city: CityDef;
-  imageId: string;
+  pano: string;
 }
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j] as T, a[i] as T];
-  }
-  return a;
-}
-
-// `mesh` (the 3D reconstruction geometry mapillary-js projects the photo
-// onto) isn't a field the bulk /images search endpoint will return — asking
-// for it there gets rejected outright — so it has to be checked per-image
-// against the single-image endpoint instead. Some crowd-sourced images only
-// ever got basic GPS-tagged processing and never got a mesh computed at
-// all; mapillary-js doesn't error on those, it just silently renders black
-// forever (confirmed via its own internal "Incorrect mesh URL" console
-// warning), so a missing mesh is just as disqualifying as a fisheye camera.
-async function hasMesh(imageId: string, token: string, fetchImpl: typeof fetch): Promise<boolean> {
-  try {
-    const res = await fetchImpl(`https://graph.mapillary.com/${imageId}?access_token=${encodeURIComponent(token)}&fields=id,mesh`);
-    if (!res.ok) return false;
-    const data = (await res.json()) as { mesh?: { url?: string } };
-    return Boolean(data.mesh?.url);
-  } catch {
-    return false;
-  }
-}
-
-// Queries Mapillary's Graph API for images inside a small bounding box
-// around a jittered point within a random city, retrying with a different
-// city/point if that spot turns out to have no coverage. Exported (rather
-// than inlined in createInitialState) so it's independently testable by
-// injecting a stub `fetchImpl` — this is the one piece of this game that
-// depends on a live network call to a service we don't control.
+// Checks Street View coverage near a jittered point within a random city,
+// retrying with a different city/point if that spot turns out to have none
+// — Google's own coverage is dense in cities, so this rarely needs more
+// than a try or two, unlike a crowd-sourced imagery source. Exported
+// (rather than inlined in createInitialState) so it's independently
+// testable by injecting a stub `fetchImpl`.
 export async function findRoundStart(
-  token: string,
+  apiKey: string,
   fetchImpl: typeof fetch = fetch,
   citiesPool: CityDef[] = CITIES
 ): Promise<RoundStart | null> {
@@ -87,27 +60,14 @@ export async function findRoundStart(
     const city = citiesPool[Math.floor(Math.random() * citiesPool.length)]!;
     const lat = city.lat + (Math.random() - 0.5) * city.spread;
     const lng = city.lng + (Math.random() - 0.5) * city.spread;
-    const bbox = [lng - BBOX_HALF_DEGREES, lat - BBOX_HALF_DEGREES, lng + BBOX_HALF_DEGREES, lat + BBOX_HALF_DEGREES].join(",");
     try {
       const res = await fetchImpl(
-        `https://graph.mapillary.com/images?access_token=${encodeURIComponent(token)}&fields=id,camera_type&bbox=${bbox}&limit=20`
+        `https://maps.googleapis.com/maps/api/streetview/metadata?location=${lat},${lng}&radius=${SEARCH_RADIUS_METERS}&source=outdoor&key=${encodeURIComponent(apiKey)}`
       );
       if (!res.ok) continue;
-      const data = (await res.json()) as { data?: { id: string; camera_type?: string }[] };
-      // Fisheye-captured images (action-cam style, heavily distorted) can
-      // also get mapillary-js's renderer stuck — standard perspective and
-      // true 360 (equirectangular/spherical) shots both render reliably.
-      const images = (data.data ?? []).filter((img) => img.camera_type !== "fisheye");
-      if (images.length < MIN_IMAGES_FOR_A_GOOD_START) continue;
-
-      // Check a handful of candidates (in parallel) for an actual mesh
-      // before committing to one.
-      const candidates = shuffle(images).slice(0, 6);
-      const checked = await Promise.all(candidates.map(async (img) => ({ img, ok: await hasMesh(img.id, token, fetchImpl) })));
-      const withMesh = checked.filter((c) => c.ok).map((c) => c.img);
-      if (withMesh.length > 0) {
-        const pick = withMesh[Math.floor(Math.random() * withMesh.length)]!;
-        return { city, imageId: pick.id };
+      const data = (await res.json()) as { status: string; pano_id?: string };
+      if (data.status === "OK" && data.pano_id) {
+        return { city, pano: data.pano_id };
       }
     } catch {
       continue;
@@ -126,7 +86,7 @@ export interface StreetSnapState {
   voteMs: number;
   roundIndex: number;
   city: { name: string; country: string };
-  startImageId: string;
+  startPano: string;
   phase: StreetSnapPhase;
   exploreEndsAt: number | null;
   voteEndsAt: number | null;
@@ -148,8 +108,8 @@ export interface StreetSnapView {
   roundIndex: number;
   totalRounds: number;
   city: { name: string; country: string };
-  startImageId: string;
-  accessToken: string;
+  startPano: string;
+  mapsApiKey: string;
   phase: StreetSnapPhase;
   exploreEndsAt: number | null;
   voteEndsAt: number | null;
@@ -189,8 +149,8 @@ function endVoting(state: StreetSnapState): StreetSnapState {
   return { ...state, phase: "roundEnd", voteEndsAt: null, scores, lastRoundGains, log };
 }
 
-async function startRound(state: StreetSnapState, roundIndex: number, token: string): Promise<StreetSnapState> {
-  const start = await findRoundStart(token);
+async function startRound(state: StreetSnapState, roundIndex: number, apiKey: string): Promise<StreetSnapState> {
+  const start = await findRoundStart(apiKey);
   if (!start) throw new Error("Couldn't find a Street Snap starting point with imagery right now — try again in a bit.");
   const photos: Record<PlayerId, CameraState | null> = {};
   for (const id of state.playerIds) photos[id] = null;
@@ -198,7 +158,7 @@ async function startRound(state: StreetSnapState, roundIndex: number, token: str
     ...state,
     roundIndex,
     city: { name: start.city.name, country: start.city.country },
-    startImageId: start.imageId,
+    startPano: start.pano,
     phase: "exploring",
     exploreEndsAt: Date.now() + state.exploreMs,
     voteEndsAt: null,
@@ -223,10 +183,10 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
     ],
   },
   async createInitialState(players, options: GameOptions) {
-    const token = process.env.MAPILLARY_TOKEN;
-    if (!token) {
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
       throw new Error(
-        "Street Snap needs a free Mapillary access token to load street imagery. Set the MAPILLARY_TOKEN environment variable (get one at mapillary.com/dashboard/developers) and restart the server."
+        "Street Snap needs a Google Maps API key to load street imagery. Set the GOOGLE_MAPS_API_KEY environment variable (create one at console.cloud.google.com with the Maps JavaScript API and Street View Static API enabled) and restart the server."
       );
     }
     const host = players.find((p) => p.isHost) ?? players[0]!;
@@ -242,7 +202,7 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
       voteMs: VOTE_MS_DEFAULT,
       roundIndex: 0,
       city: { name: "", country: "" },
-      startImageId: "",
+      startPano: "",
       phase: "exploring",
       exploreEndsAt: null,
       voteEndsAt: null,
@@ -252,10 +212,10 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
       lastRoundGains: {},
       log: [],
     };
-    return startRound(base, 0, token);
+    return startRound(base, 0, apiKey);
   },
   async applyAction(state, playerId, action) {
-    const token = process.env.MAPILLARY_TOKEN ?? "";
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY ?? "";
 
     if (action.type === "timeUp") {
       if (state.phase === "exploring") {
@@ -296,7 +256,7 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
       if (state.phase !== "roundEnd") throw new GameActionError("Nothing to advance.");
       const nextRoundIndex = state.roundIndex + 1;
       if (nextRoundIndex >= state.totalRounds) return { ...state, phase: "finished" };
-      return startRound(state, nextRoundIndex, token);
+      return startRound(state, nextRoundIndex, apiKey);
     }
 
     throw new GameActionError("Unknown action.");
@@ -309,8 +269,8 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
       roundIndex: state.roundIndex,
       totalRounds: state.totalRounds,
       city: state.city,
-      startImageId: state.startImageId,
-      accessToken: process.env.MAPILLARY_TOKEN ?? "",
+      startPano: state.startPano,
+      mapsApiKey: process.env.GOOGLE_MAPS_API_KEY ?? "",
       phase: state.phase,
       exploreEndsAt: state.exploreEndsAt,
       voteEndsAt: state.voteEndsAt,

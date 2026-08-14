@@ -1,9 +1,9 @@
 // Curated list of large, well-known cities to land in for Street Snap —
-// picked for having enough real foot/street traffic (and therefore, in
-// practice, denser Mapillary contributor coverage) to make "walk around for
-// 3 minutes" actually work, rather than a uniformly-random point on Earth
-// that might have zero nearby imagery. Coverage still isn't guaranteed for
-// any single city on any given try — see streetSnap.ts's retry logic.
+// picked to guarantee dense Street View coverage and a real "walk around
+// for 3 minutes" experience, rather than a uniformly-random point on Earth
+// that might land somewhere with sparse or no nearby imagery. Coverage
+// still isn't guaranteed for any single point on any given try — see
+// streetSnap.ts's retry logic.
 export interface CityDef {
   name: string;
   country: string;

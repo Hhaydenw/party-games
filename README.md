@@ -322,48 +322,36 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   rounds land on distinguishable colors instead of muddy near-greys.
 - **Street Snap** is a GeoGuessr-style *photo* game — everyone lands at the
   same starting point in a real, random city, explores on foot for a few
-  minutes using [MapillaryJS](https://mapillary.github.io/mapillary-js/)
-  (free, crowd-sourced street-level imagery, not Google Street View — see
-  below for why), and each player "takes" exactly one photo before
-  everyone votes on their favorite. **Important design detail**: a "photo"
-  here is never an actual captured/downloaded image — it's the *camera
-  state* (which image, which direction and zoom you'd framed) at the
-  moment you hit the shutter, saved and then replayed live through a
-  fresh viewer at voting time. Two real constraints drove that: browsers
-  block `canvas.toDataURL()` on imagery tiles served without permissive
-  CORS headers (the common case, and true of Street View too — the "just
-  screenshot it" version of this game likely isn't implementable against
-  *any* provider), and extracting/storing imagery outside a provider's own
-  viewer risks violating their terms of use. Replaying a saved camera state
-  sidesteps both, since nothing is ever exported — Mapillary's own viewer
-  is what's always doing the actual rendering, live, for both the
-  photographer and the voters. Coverage is real-world and crowd-sourced,
-  so it's uneven — a curated list of ~25 major cities
-  (`lib/games/streetSnapCities.ts`) with usually-decent coverage is used
-  instead of a uniformly random point on Earth, and a round that can't find
-  imagery near its first pick quietly retries a different spot/city rather
-  than starting somewhere empty. Starting points are also filtered to
-  exclude fisheye-camera images (mapillary-js's renderer can get stuck on
-  those) and images with no computed 3D mesh — some crowd-sourced photos
-  only ever got basic GPS-tagged processing and never had their
-  reconstruction geometry computed, which mapillary-js also renders as a
-  silent black screen rather than an error (confirmed via its own internal
-  "Incorrect mesh URL" console warning). Since `mesh` isn't a field the
-  bulk image-search endpoint allows requesting, a handful of candidates get
-  individually checked against the single-image endpoint before one is
-  picked. Both filters only apply to the round's *starting* point, though —
-  a player can still walk onto a fisheye or mesh-less image mid-round via
-  mapillary-js's own navigation, since the SDK doesn't expose a way to
-  pre-filter that; if a round ever seems stuck loading, the browser console
-  now logs specifically why. **Needs setup**: a free Mapillary access
-  token (see below) — without one, the game fails to start with a clear
-  message instead of a crash, and every other game keeps working normally.
-  This is also the one feature in the whole app that couldn't be verified
-  the way everything else here was — its engine logic (city-picking
-  retries, round/vote state machine, scoring) has real automated tests
-  like every other game, but the live 3D imagery viewer itself needs an
-  actual browser and a real token to see rendered, which wasn't available
-  while building it.
+  minutes using the real Google Street View panorama viewer (the Maps
+  JavaScript API's `StreetViewPanorama`), and each player "takes" exactly
+  one photo before everyone votes on their favorite. An earlier version of
+  this game used Mapillary's free crowd-sourced imagery instead, to avoid
+  needing a billed API key — that held up fine in engine testing but broke
+  down in real use: coverage/image quality was too inconsistent for a good
+  photo-taking game (crowd-sourced images occasionally lack the processing
+  Street View's own uniformly-captured imagery always has), so it was
+  switched to Google Street View, same as real GeoGuessr uses.
+  **Important design detail, unrelated to which provider**: a "photo" here
+  is never an actual captured/downloaded image — it's the *camera state*
+  (which panorama, which heading/pitch/zoom you'd framed) at the moment you
+  hit the shutter, saved and then replayed live through a fresh, read-only
+  viewer at voting time. Two real constraints drove that: browsers block
+  `canvas.toDataURL()` on imagery tiles served without permissive CORS
+  headers (true of Street View's tiles), and extracting/storing imagery
+  outside a provider's own viewer risks violating its terms of use.
+  Replaying a saved camera state sidesteps both, since nothing is ever
+  exported — Google's own viewer is what's always doing the actual
+  rendering, live, for both the photographer and the voters, exactly like
+  normal Street View embedding anywhere else on the web. A curated list of
+  ~25 major cities (`lib/games/streetSnapCities.ts`) is used instead of a
+  uniformly random point on Earth, and a round that can't find coverage
+  near its first pick quietly retries a different spot/city — though
+  Street View's own coverage in cities is dense enough that this is a much
+  smaller concern than it was with crowd-sourced imagery. **Needs setup**:
+  a Google Cloud API key with the Maps JavaScript API and Street View
+  Static API enabled (see below) — without one, the game fails to start
+  with a clear message instead of a crash, and every other game keeps
+  working normally.
 
 ### Family Feud content note
 
@@ -389,19 +377,25 @@ Open **http://localhost:3000**. Create a room, then share the room code or the
 ### Optional: enabling Street Snap
 
 Every other game here works with zero setup — no accounts, no API keys.
-**Street Snap** is the one exception: it needs a free Mapillary access
-token for its street imagery.
+**Street Snap** is the one exception: it needs a Google Maps API key with
+billing enabled (Google requires a card on file for the Maps Platform, but
+usage for a casual party app comfortably stays within the free monthly
+allowance — metadata lookups specifically, which is most of what the
+server itself does, aren't billed at all).
 
-1. Sign in at [mapillary.com](https://www.mapillary.com) and register an app
-   at [mapillary.com/dashboard/developers](https://www.mapillary.com/dashboard/developers)
-   to get a client access token (starts with `MLY|`). No billing/credit
-   card required — this is a genuinely free tier, not a trial.
-2. Create a `.env.local` file in the project root:
+1. Create/select a project at [console.cloud.google.com](https://console.cloud.google.com),
+   enable **Maps JavaScript API** and **Street View Static API** for it,
+   set up a billing account, then create an API key under
+   **APIs & Services → Credentials**.
+2. For production use, restrict the key (HTTP referrer restriction to your
+   domain) rather than leaving it unrestricted — it's sent to the browser,
+   same as any Maps JS API key on any website.
+3. Create a `.env.local` file in the project root:
    ```
-   MAPILLARY_TOKEN=MLY|your-token-here
+   GOOGLE_MAPS_API_KEY=your-key-here
    ```
-3. Restart the dev server (`npm run dev`). Street Snap will now appear as a
-   playable option; without a token it still shows up in the game list but
+4. Restart the dev server (`npm run dev`). Street Snap will now appear as a
+   playable option; without a key it still shows up in the game list but
    fails to start with a clear explanation instead of crashing the room.
 
 ## Playing with friends over the internet
@@ -431,9 +425,10 @@ that rules out pure serverless hosts like Vercel's default deploy. Easiest optio
 - **A VPS**: `npm run build`, then run `npm start` behind a reverse proxy (Caddy/Nginx)
   with TLS, e.g. via `pm2` or a systemd service so it survives reboots.
 
-If you want Street Snap to work in production too, set `MAPILLARY_TOKEN` as an
-environment variable in your host's dashboard (Render/Railway/Fly all have one) —
-same free token from the setup section above, nothing extra to configure.
+If you want Street Snap to work in production too, set `GOOGLE_MAPS_API_KEY` as
+an environment variable in your host's dashboard (Render/Railway/Fly all have
+one) — same key from the setup section above. If you restricted the key by
+HTTP referrer, make sure your production domain is on that allow-list too.
 
 Room state currently lives in memory on the server process — restarting the server
 clears all active rooms. That's fine for casual game nights; if you want rooms to

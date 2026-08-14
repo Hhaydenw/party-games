@@ -1,48 +1,28 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Viewer as ViewerType } from "mapillary-js";
-import "mapillary-js/dist/mapillary.css";
 import { CameraState, StreetSnapAction, StreetSnapView as ViewType } from "@/lib/games/streetSnap";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
 
-// This is the one game in the app whose core interaction (a live WebGL
-// street-imagery viewer) can't be exercised by this project's usual
-// automated test suite — everything else here is verified end-to-end with
-// real socket/unit tests, but there's no headless way to confirm mapillary-js
-// actually renders correctly against live imagery without a real browser and
-// a real MAPILLARY_TOKEN. The integration below is written against
-// mapillary-js's documented/shipped TypeScript API, but treat it as needing
-// a first real run-through before trusting it blind.
-//
-// One real issue this surfaced: MapillaryJS measures its container's size
-// at construction time to size its WebGL viewport, but React/flexbox/
-// aspect-ratio layouts don't always have their final size committed to the
-// DOM on the exact tick the viewer is constructed — the viewer can end up
-// rendering into a 0x0 (or stale) viewport, which shows as a solid black
-// box even though data loaded successfully. `attachResizeObserver` below
-// forces a re-measure on the next animation frame and on any subsequent
-// container resize, which is the fix.
-function attachResizeObserver(container: HTMLElement, viewer: ViewerType): () => void {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      try {
-        viewer.resize();
-      } catch {
-        // ignore — viewer may already be torn down
-      }
-    });
-  });
-  const observer = new ResizeObserver(() => {
-    try {
-      viewer.resize();
-    } catch {
-      // ignore
-    }
-  });
-  observer.observe(container);
-  return () => observer.disconnect();
+// Guards so the Maps JS API's options are only set once per page (the
+// loader errors if you try to change them after a library's already been
+// requested) and so every viewer instance shares one in-flight import
+// rather than each racing to request the script separately.
+let optionsSet = false;
+let streetViewLibraryPromise: Promise<google.maps.StreetViewLibrary> | null = null;
+let coreLibraryPromise: Promise<google.maps.CoreLibrary> | null = null;
+
+async function loadStreetView(apiKey: string): Promise<{ StreetViewPanorama: typeof google.maps.StreetViewPanorama; event: typeof google.maps.event }> {
+  const { setOptions, importLibrary } = await import("@googlemaps/js-api-loader");
+  if (!optionsSet) {
+    setOptions({ key: apiKey, v: "weekly" });
+    optionsSet = true;
+  }
+  streetViewLibraryPromise ??= importLibrary("streetView");
+  coreLibraryPromise ??= importLibrary("core");
+  const [streetView, core] = await Promise.all([streetViewLibraryPromise, coreLibraryPromise]);
+  return { StreetViewPanorama: streetView.StreetViewPanorama, event: core.event };
 }
 
 export default function StreetSnapView({
@@ -148,8 +128,7 @@ export default function StreetSnapView({
 
 function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action: StreetSnapAction) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const viewerRef = useRef<ViewerType | null>(null);
-  const currentImageIdRef = useRef<string>(view.startImageId);
+  const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const submittedRef = useRef(view.yourPhotoSubmitted);
@@ -157,54 +136,42 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
 
   useEffect(() => {
     let cancelled = false;
-    let detachResize: (() => void) | null = null;
     setReady(false);
     setLoadError(null);
-    currentImageIdRef.current = view.startImageId;
 
-    // If nothing has loaded after a while, surface that instead of leaving
-    // an unexplained black box on screen — most likely causes are a bad/
-    // scoped-wrong token or no network access to Mapillary's CDN.
     const stallTimer = setTimeout(() => {
       if (!cancelled) {
-        console.warn("[StreetSnap] mapillary-js never fired 'image' or 'load' within 12s for", view.startImageId);
-        setLoadError((prev) => prev ?? "Still loading after 12s — check the browser console, and that your Mapillary token is valid.");
+        console.warn("[StreetSnap] Street View panorama never became ready within 12s for", view.startPano);
+        setLoadError((prev) => prev ?? "Still loading after 12s — check the browser console, and that your Google Maps API key is valid and has billing enabled.");
       }
     }, 12_000);
-    // "load" (overall viewer/asset load) turned out to be an unreliable
-    // signal in practice — it can take much longer than the current image
-    // actually needs, or not fire at all, even once the photo is visibly
-    // ready. "image" (the viewer's current image has been set) fires as
-    // soon as the requested photo is actually showing, so readiness is now
-    // gated on whichever of the two fires first.
-    const markReady = () => {
-      if (cancelled) return;
-      clearTimeout(stallTimer);
-      setReady(true);
-      setLoadError(null);
-    };
 
     (async () => {
       try {
-        const { Viewer } = await import("mapillary-js");
+        const { StreetViewPanorama, event } = await loadStreetView(view.mapsApiKey);
         if (cancelled || !containerRef.current) return;
-        // Deliberately *not* passing `imageId` here — that ties readiness to
-        // passive "image"/"load" events which may only fire on subsequent
-        // navigation, not for whatever image the viewer starts with. Calling
-        // `moveTo` explicitly and awaiting its promise is a direct,
-        // unambiguous "this specific image finished loading" signal instead.
-        const viewer = new Viewer({ container: containerRef.current, accessToken: view.accessToken });
-        viewer.on("image", (e) => {
-          currentImageIdRef.current = e.image.id;
-          markReady();
+        const panorama = new StreetViewPanorama(containerRef.current, {
+          pano: view.startPano,
+          addressControl: false,
+          showRoadLabels: false,
+          fullscreenControl: false,
+          motionTracking: false,
+          motionTrackingControl: false,
+          clickToGo: true,
+          linksControl: true,
+          panControl: true,
+          zoomControl: true,
         });
-        viewer.on("load", markReady);
-        detachResize = attachResizeObserver(containerRef.current, viewer);
-        viewerRef.current = viewer;
-        await viewer.moveTo(view.startImageId);
-        markReady();
+        panorama.addListener("status_changed", () => {
+          if (cancelled) return;
+          clearTimeout(stallTimer);
+          setReady(true);
+          setLoadError(null);
+        });
+        panoramaRef.current = panorama;
+        requestAnimationFrame(() => requestAnimationFrame(() => event.trigger(panorama, "resize")));
       } catch (err) {
-        console.error("[StreetSnap] failed to load viewer/image:", err);
+        console.error("[StreetSnap] failed to load Street View:", err);
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Couldn't load street imagery.");
       }
     })();
@@ -212,33 +179,21 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     return () => {
       cancelled = true;
       clearTimeout(stallTimer);
-      detachResize?.();
-      try {
-        viewerRef.current?.remove();
-      } catch {
-        // ignore teardown errors
-      }
-      viewerRef.current = null;
+      panoramaRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.startImageId]);
+  }, [view.startPano, view.mapsApiKey]);
 
-  async function captureCurrentCamera(): Promise<CameraState> {
-    const viewer = viewerRef.current;
-    if (!viewer) return { imageId: currentImageIdRef.current, center: [0.5, 0.5], zoom: 1 };
-    try {
-      const [center, zoom] = await Promise.all([viewer.getCenter(), viewer.getZoom()]);
-      return { imageId: currentImageIdRef.current, center: [center[0] ?? 0.5, center[1] ?? 0.5], zoom };
-    } catch {
-      return { imageId: currentImageIdRef.current, center: [0.5, 0.5], zoom: 1 };
-    }
+  function captureCurrentCamera(): CameraState {
+    const panorama = panoramaRef.current;
+    if (!panorama) return { pano: view.startPano, heading: 0, pitch: 0, zoom: 1 };
+    const pov = panorama.getPov();
+    return { pano: panorama.getPano(), heading: pov.heading, pitch: pov.pitch, zoom: panorama.getZoom() ?? 1 };
   }
 
-  async function takePhoto() {
+  function takePhoto() {
     if (submittedRef.current) return;
     playSound("select");
-    const camera = await captureCurrentCamera();
-    onAction({ type: "submitPhoto", camera });
+    onAction({ type: "submitPhoto", camera: captureCurrentCamera() });
   }
 
   // Auto-submit whatever the player's currently framing if their own clock
@@ -247,7 +202,7 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   const autoSubmitted = useRef(false);
   useEffect(() => {
     autoSubmitted.current = false;
-  }, [view.startImageId]);
+  }, [view.startPano]);
   useEffect(() => {
     if (!view.exploreEndsAt) return;
     const msLeft = view.exploreEndsAt - Date.now();
@@ -272,11 +227,11 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         )}
         {loadError && (
           <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-accent">
-            Couldn't load the street view viewer: {loadError}
+            Couldn't load the street view: {loadError}
           </div>
         )}
       </div>
-      <p className="text-xs text-slate-500">Drag to look around, click the arrows on the ground to walk. Imagery © Mapillary contributors.</p>
+      <p className="text-xs text-slate-500">Drag to look around, click the arrows on the ground to walk. © Google Street View.</p>
       {view.yourPhotoSubmitted ? (
         <p className="text-sm text-emerald-400">📸 Photo taken! Waiting on {view.totalPlayers - view.submittedCount} more…</p>
       ) : (
@@ -303,73 +258,54 @@ function VotingPanel({
   const [index, setIndex] = useState(0);
   const current = votable[Math.min(index, Math.max(0, votable.length - 1))];
   const containerRef = useRef<HTMLDivElement>(null);
-  const viewerRef = useRef<ViewerType | null>(null);
+  const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    let detachResize: (() => void) | null = null;
     setReady(false);
-    if (!current) return;
+    if (!current?.camera) return;
     const stallTimer = setTimeout(() => {
-      if (!cancelled) console.warn("[StreetSnap] voting viewer never became ready within 12s for", current.camera?.imageId);
+      if (!cancelled) console.warn("[StreetSnap] voting panorama never became ready within 12s for", current.camera?.pano);
     }, 12_000);
     (async () => {
       try {
-        const { Viewer } = await import("mapillary-js");
+        const { StreetViewPanorama, event } = await loadStreetView(view.mapsApiKey);
         if (cancelled || !containerRef.current || !current.camera) return;
-        // See ExploringPanel's comment — constructing without an initial
-        // `imageId` and explicitly awaiting `moveTo` is a more reliable
-        // completion signal than passive "image"/"load" events.
-        const viewer = new Viewer({ container: containerRef.current, accessToken: view.accessToken });
-        let applied = false;
-        const applyFraming = () => {
-          if (cancelled || applied || !current.camera) return;
-          applied = true;
+        // Fully locked, read-only: pov/zoom are passed straight into the
+        // constructor (unlike the exploring viewer, there's no need to
+        // apply them after the fact) and every interactive control is off
+        // — this is purely a display of exactly how they framed their shot.
+        const panorama = new StreetViewPanorama(containerRef.current, {
+          pano: current.camera.pano,
+          pov: { heading: current.camera.heading, pitch: current.camera.pitch },
+          zoom: current.camera.zoom,
+          disableDefaultUI: true,
+          clickToGo: false,
+          linksControl: false,
+          panControl: false,
+          zoomControl: false,
+          addressControl: false,
+          motionTracking: false,
+          motionTrackingControl: false,
+        });
+        panorama.addListener("status_changed", () => {
+          if (cancelled) return;
           clearTimeout(stallTimer);
-          try {
-            viewer.setCenter(current.camera.center);
-            viewer.setZoom(current.camera.zoom);
-          } catch {
-            // best-effort — worst case the framing isn't restored exactly
-          }
           setReady(true);
-        };
-        viewer.on("image", applyFraming);
-        viewer.on("load", applyFraming);
-        // Read-only: no walking/looking around someone else's shot, just
-        // display it as they framed it. Attribution stays on, since this is
-        // community-contributed imagery.
-        for (const name of ["direction", "sequence", "pointer", "zoom"] as const) {
-          try {
-            viewer.deactivateComponent(name);
-          } catch {
-            // ignore if a given component name isn't available
-          }
-        }
-        detachResize = attachResizeObserver(containerRef.current, viewer);
-        viewerRef.current = viewer;
-        await viewer.moveTo(current.camera.imageId);
-        applyFraming();
+        });
+        panoramaRef.current = panorama;
+        requestAnimationFrame(() => requestAnimationFrame(() => event.trigger(panorama, "resize")));
       } catch (err) {
-        // leave `ready` false — panel shows a loading state indefinitely,
-        // which is an acceptable degraded state for a single photo
         console.error("[StreetSnap] voting viewer failed to load:", err);
       }
     })();
     return () => {
       cancelled = true;
       clearTimeout(stallTimer);
-      detachResize?.();
-      try {
-        viewerRef.current?.remove();
-      } catch {
-        // ignore
-      }
-      viewerRef.current = null;
+      panoramaRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.playerId, current?.camera?.imageId]);
+  }, [current?.playerId, current?.camera?.pano, view.mapsApiKey]);
 
   function vote() {
     if (!current || view.yourVote) return;
