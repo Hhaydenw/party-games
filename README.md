@@ -353,7 +353,12 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   that also avoids the biggest driver of API usage, which would otherwise
   be every player loading a full interactive panorama for every *other*
   player's photo each round (players × (players-1) live loads, just for
-  voting). A curated list of
+  voting). Voting shows every submitted photo together in a grid (not a
+  one-at-a-time carousel), including your own for context, with **live
+  vote attribution** — not just a count, but who specifically has picked
+  each photo so far, updating in real time as votes come in during voting
+  itself rather than only being revealed once everyone's done. The same
+  grid is reused, read-only, for the round-end results screen. A curated list of
   ~25 major cities (`lib/games/streetSnapCities.ts`) is used instead of a
   uniformly random point on Earth, and a round that can't find coverage
   near its first pick quietly retries a different spot/city — though

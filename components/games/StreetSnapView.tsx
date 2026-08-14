@@ -103,23 +103,8 @@ export default function StreetSnapView({
       </div>
 
       {view.phase === "exploring" && <ExploringPanel view={view} onAction={onAction} />}
-      {view.phase === "voting" && <VotingPanel view={view} onAction={onAction} meId={meId} nameFor={nameFor} />}
-
-      {(view.phase === "roundEnd" || view.phase === "finished") && (
-        <div className="flex w-full max-w-lg flex-col items-center gap-2">
-          <p className="text-sm font-semibold text-slate-300">Round results</p>
-          {(view.photos ?? [])
-            .slice()
-            .sort((a, b) => b.votes - a.votes)
-            .map((p) => (
-              <div key={p.playerId} className="flex w-full items-center justify-between rounded-xl bg-white/5 px-4 py-2 text-sm">
-                <span>{nameFor(p.playerId)}</span>
-                <span className="text-gold">
-                  {p.votes} vote{p.votes === 1 ? "" : "s"}
-                </span>
-              </div>
-            ))}
-        </div>
+      {(view.phase === "voting" || view.phase === "roundEnd" || view.phase === "finished") && (
+        <PhotoGrid view={view} onAction={onAction} meId={meId} nameFor={nameFor} interactive={view.phase === "voting"} />
       )}
 
       <div className="flex flex-wrap justify-center gap-3 text-sm">
@@ -268,74 +253,113 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   );
 }
 
-function VotingPanel({
+// Shared by both the voting phase and the results screens — everyone's
+// photo shown together (not a one-at-a-time carousel), with live vote
+// attribution (who's picked what, not just a count) that updates as votes
+// come in, since the underlying view data is already live during voting,
+// not just revealed afterward. `interactive` controls whether vote buttons
+// show at all; the results screens reuse the exact same grid read-only.
+function PhotoGrid({
   view,
   onAction,
   meId,
   nameFor,
+  interactive,
 }: {
   view: ViewType;
   onAction: (action: StreetSnapAction) => void;
   meId: string;
   nameFor: (id: string) => string;
+  interactive: boolean;
 }) {
-  const votable = (view.photos ?? []).filter((p) => p.playerId !== meId);
-  const [index, setIndex] = useState(0);
-  const current = votable[Math.min(index, Math.max(0, votable.length - 1))];
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => setLoaded(false), [current?.playerId]);
-
-  function vote() {
-    if (!current || view.yourVote) return;
-    playSound("select");
-    onAction({ type: "vote", votedForPlayerId: current.playerId });
+  const photos = view.photos ?? [];
+  if (photos.length === 0) {
+    return <p className="text-sm text-slate-400">Nobody submitted a photo this round.</p>;
   }
+  const maxVotes = Math.max(0, ...photos.map((p) => p.votes));
 
-  if (votable.length === 0) {
-    return <p className="text-sm text-slate-400">Nobody else submitted a photo this round.</p>;
+  function vote(playerId: string) {
+    if (view.yourVote) return;
+    playSound("select");
+    onAction({ type: "vote", votedForPlayerId: playerId });
   }
 
   return (
-    <div className="flex w-full max-w-3xl flex-col items-center gap-3">
-      {/* Voting deliberately uses a plain static image (Street View Static
-          API) instead of a full interactive panorama — nobody needs to walk
-          around someone else's already-framed shot, and it means voting
-          doesn't multiply live interactive panorama loads by every other
-          player's photo count (which would otherwise scale as players ×
-          (players-1) per round, the single biggest driver of API usage). */}
-      <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
-        {current?.camera && (
+    <div className="grid w-full max-w-5xl gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {photos.map((p) => {
+        const isMine = p.playerId === meId;
+        const isMyVote = view.yourVote === p.playerId;
+        const isLeading = !interactive && p.votes > 0 && p.votes === maxVotes;
+        return (
+          <PhotoTile
+            key={p.playerId}
+            apiKey={view.mapsApiKey}
+            camera={p.camera}
+            label={isMine ? "Your photo" : nameFor(p.playerId)}
+            votes={p.votes}
+            voterNames={p.voters.map(nameFor)}
+            highlighted={isMyVote || isLeading}
+          >
+            {interactive && !isMine && (
+              <button
+                className={`mt-2 w-full rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  isMyVote ? "bg-gold/20 text-gold" : "btn-primary disabled:opacity-40"
+                }`}
+                disabled={Boolean(view.yourVote) && !isMyVote}
+                onClick={() => vote(p.playerId)}
+              >
+                {isMyVote ? "✓ Your vote" : "Vote for this photo"}
+              </button>
+            )}
+          </PhotoTile>
+        );
+      })}
+    </div>
+  );
+}
+
+function PhotoTile({
+  apiKey,
+  camera,
+  label,
+  votes,
+  voterNames,
+  highlighted,
+  children,
+}: {
+  apiKey: string;
+  camera: CameraState | null;
+  label: string;
+  votes: number;
+  voterNames: string[];
+  highlighted: boolean;
+  children?: React.ReactNode;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className={`overflow-hidden rounded-2xl border p-3 transition ${highlighted ? "border-gold ring-2 ring-gold/50" : "border-white/10"}`}>
+      <div className="relative aspect-video overflow-hidden rounded-xl bg-black">
+        {camera && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            key={current.playerId}
-            src={buildStaticStreetViewUrl(view.mapsApiKey, current.camera)}
-            alt={`Photo by ${nameFor(current.playerId)}`}
+            src={buildStaticStreetViewUrl(apiKey, camera)}
+            alt={`Photo by ${label}`}
             className="absolute inset-0 h-full w-full object-cover"
             onLoad={() => setLoaded(true)}
           />
         )}
-        {!loaded && <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Loading photo…</div>}
+        {!loaded && <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-400">Loading photo…</div>}
       </div>
-      <div className="flex items-center gap-4">
-        <button className="btn-secondary px-3 py-1.5 text-sm" onClick={() => setIndex((i) => (i - 1 + votable.length) % votable.length)} disabled={votable.length < 2}>
-          ← Prev
-        </button>
-        <p className="text-sm text-slate-300">
-          Photo {index + 1} of {votable.length} — by {current ? nameFor(current.playerId) : "…"}
-        </p>
-        <button className="btn-secondary px-3 py-1.5 text-sm" onClick={() => setIndex((i) => (i + 1) % votable.length)} disabled={votable.length < 2}>
-          Next →
-        </button>
+      <div className="mt-2 flex items-center justify-between">
+        <p className="text-sm font-semibold">{label}</p>
+        <span className="text-xs font-bold text-gold">
+          {votes} vote{votes === 1 ? "" : "s"}
+        </span>
       </div>
-      {view.yourVote ? (
-        <p className="text-sm text-emerald-400">
-          {view.yourVote === current?.playerId ? "✓ Your vote" : `You voted for ${nameFor(view.yourVote)}`}
-        </p>
-      ) : (
-        <button className="btn-primary" onClick={vote}>
-          Vote for this photo
-        </button>
-      )}
+      {/* Live feedback — who's currently voted for this photo, updating in
+          real time as votes come in during the voting phase itself. */}
+      {voterNames.length > 0 && <p className="mt-1 truncate text-xs text-slate-400">❤️ {voterNames.join(", ")}</p>}
+      {children}
     </div>
   );
 }

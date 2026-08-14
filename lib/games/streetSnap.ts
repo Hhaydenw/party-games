@@ -101,6 +101,7 @@ interface PhotoView {
   playerId: PlayerId;
   camera: CameraState | null;
   votes: number; // only meaningful once revealed
+  voters: PlayerId[]; // who has voted for this photo so far — live during voting, not just after
 }
 
 export interface StreetSnapView {
@@ -278,7 +279,16 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
       submittedCount: Object.values(state.photos).filter(Boolean).length,
       totalPlayers: state.playerIds.length,
       photos: revealed
-        ? state.playerIds.filter((pid) => state.photos[pid]).map((pid) => ({ playerId: pid, camera: state.photos[pid] ?? null, votes: counts?.[pid] ?? 0 }))
+        ? state.playerIds
+            .filter((pid) => state.photos[pid])
+            .map((pid) => ({
+              playerId: pid,
+              camera: state.photos[pid] ?? null,
+              votes: counts?.[pid] ?? 0,
+              voters: Object.entries(state.votes)
+                .filter(([, votedFor]) => votedFor === pid)
+                .map(([voterId]) => voterId),
+            }))
         : null,
       yourVote: state.votes[playerId] ?? null,
       scores: state.playerIds.map((pid) => ({ playerId: pid, score: state.scores[pid] ?? 0, roundGain: state.lastRoundGains[pid] ?? 0 })),
