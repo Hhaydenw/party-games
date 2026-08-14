@@ -36,7 +36,11 @@ function zoomToFov(zoom: number): number {
 
 function buildStaticStreetViewUrl(apiKey: string, camera: CameraState): string {
   const params = new URLSearchParams({
-    size: "1280x720",
+    // The Street View Static API caps images at 640x640 on the standard
+    // tier regardless of what's requested (confirmed live) — asking for
+    // exactly that instead of a larger size that gets silently downscaled
+    // anyway keeps the request (and its cost) honest.
+    size: "640x640",
     pano: camera.pano,
     heading: String(camera.heading),
     pitch: String(camera.pitch),
