@@ -12,6 +12,7 @@ import { voidRaiders } from "./voidRaiders";
 import { wildestAnswer } from "./wildestAnswer";
 import { priceCheck } from "./priceCheck";
 import { luckySpin } from "./luckySpin";
+import { categoryDash } from "./categoryDash";
 
 // Games that are designed and on the roadmap but not built yet. Listed so
 // the lobby can show what's coming without pretending they're playable.
@@ -31,6 +32,7 @@ export const GAMES: Record<string, GameDefinition<any, any, any>> = {
   [wildestAnswer.meta.id]: wildestAnswer,
   [priceCheck.meta.id]: priceCheck,
   [luckySpin.meta.id]: luckySpin,
+  [categoryDash.meta.id]: categoryDash,
 };
 
 export function getGame(id: string): GameDefinition<any, any, any> | undefined {

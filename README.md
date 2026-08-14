@@ -7,7 +7,7 @@ invite link, everyone picks a display name, and you play together in real time.
 
 The platform (rooms, invite links, display names, lobby, reconnect) is built so
 new games drop in as self-contained plugins without touching anything else.
-Thirteen games are fully implemented:
+Fourteen games are fully implemented:
 
 | Game | Category | Players |
 |---|---|---|
@@ -17,6 +17,7 @@ Thirteen games are fully implemented:
 | **Doodle Guess** (Pictionary/skribbl-style) | 📱 Party | 3–10 |
 | **Name That Tune** | 📱 Party | 2–12 |
 | **Wildest Answer** (Quiplash-style prompt/vote) | 📱 Party | 4–8 |
+| **Category Dash** (Scattergories-style) | 📱 Party | 2–12 |
 | **Price Check** (Price Is Right-style) | 📱 Party | 2–12 |
 | **Lucky Spin** (Wheel of Fortune-style) | 📱 Party | 2–6 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
@@ -119,7 +120,8 @@ panel since they play to a win condition rather than N rounds.
 itself. Trivia Night pulls live from a database of thousands of real questions.
 Family Feud has 100+ original questions and tracks which ones it's already asked,
 across games, for as long as the server keeps running. Name That Tune does the
-same for songs — and doesn't store a song list at all (see below). None of these
+same for songs — and doesn't store a song list at all (see below). Category Dash
+does the same for its 50 original categories. None of these
 reset until their pool is exhausted, and even then
 they only start reusing — they never *guarantee* a repeat within a normal night.
 
