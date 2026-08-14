@@ -131,6 +131,7 @@ export default function FamilyFeudView({
   }, [view.guessDeadline, isHost, onAction]);
 
   return (
+    <div className="grid w-full gap-5 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-stretch justify-center gap-4">
         {view.teams.map((t) => {
@@ -270,40 +271,45 @@ export default function FamilyFeudView({
           {view.phase === "roundEnd" && !isHost && <p className="text-sm text-slate-400">Waiting for the host…</p>}
         </div>
       )}
+    </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-xl bg-black/20 p-3 text-xs text-slate-400">
-          {view.roundLog.map((line, i) => (
-            <p key={i}>{line}</p>
+    {/* Side rail (stacks below the board on narrower screens): round log and
+        team chat both live here instead of below the board's own column,
+        so on a wide screen you're not scrolling past everything to reach
+        them. */}
+    <aside className="flex flex-col gap-3 xl:sticky xl:top-4">
+      <div className="rounded-xl bg-black/20 p-3 text-xs text-slate-400">
+        {view.roundLog.map((line, i) => (
+          <p key={i}>{line}</p>
+        ))}
+      </div>
+
+      {/* Private team chat — only your own teammates ever see these messages. */}
+      <div className={`flex flex-col gap-2 rounded-xl p-3 ring-1 ${TEAM_STYLE[view.yourTeam]!.bg} ${TEAM_STYLE[view.yourTeam]!.ring}`}>
+        <p className={`text-[10px] font-bold uppercase tracking-widest ${TEAM_STYLE[view.yourTeam]!.text}`}>
+          🤫 {myTeamMeta.name} chat (teammates only)
+        </p>
+        <div className="max-h-40 flex-1 overflow-y-auto text-xs xl:max-h-64">
+          {view.teamChat.length === 0 && <p className="text-slate-500">Strategize with your team here…</p>}
+          {view.teamChat.map((m) => (
+            <p key={m.id} className="text-slate-300">
+              <span className="font-semibold text-slate-400">{nameFor(m.playerId)}: </span>
+              {m.text}
+            </p>
           ))}
         </div>
-
-        {/* Private team chat — only your own teammates ever see these messages. */}
-        <div className={`flex flex-col gap-2 rounded-xl p-3 ring-1 ${TEAM_STYLE[view.yourTeam]!.bg} ${TEAM_STYLE[view.yourTeam]!.ring}`}>
-          <p className={`text-[10px] font-bold uppercase tracking-widest ${TEAM_STYLE[view.yourTeam]!.text}`}>
-            🤫 {myTeamMeta.name} chat (teammates only)
-          </p>
-          <div className="max-h-28 flex-1 overflow-y-auto text-xs">
-            {view.teamChat.length === 0 && <p className="text-slate-500">Strategize with your team here…</p>}
-            {view.teamChat.map((m) => (
-              <p key={m.id} className="text-slate-300">
-                <span className="font-semibold text-slate-400">{nameFor(m.playerId)}: </span>
-                {m.text}
-              </p>
-            ))}
-          </div>
-          <form onSubmit={submitChat} className="flex gap-1.5">
-            <input
-              className="input py-1.5 text-xs"
-              placeholder="Message your team…"
-              maxLength={200}
-              value={chatDraft}
-              onChange={(e) => setChatDraft(e.target.value)}
-            />
-            <button className="btn-secondary shrink-0 px-3 py-1.5 text-xs">Send</button>
-          </form>
-        </div>
+        <form onSubmit={submitChat} className="flex gap-1.5">
+          <input
+            className="input py-1.5 text-xs"
+            placeholder="Message your team…"
+            maxLength={200}
+            value={chatDraft}
+            onChange={(e) => setChatDraft(e.target.value)}
+          />
+          <button className="btn-secondary shrink-0 px-3 py-1.5 text-xs">Send</button>
+        </form>
       </div>
+    </aside>
     </div>
   );
 }

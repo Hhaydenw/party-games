@@ -70,6 +70,11 @@ centered column, with the player list/settings/action rail sticky alongside
 the main content instead of stacked below it — so on a normal desktop window
 you're not scrolling past a small centered board to reach the controls. It
 still collapses to a single stacked column on narrower/mobile screens.
+Several individual games with a lot of on-screen content (Family Feud, Lucky
+Spin, Word Grid, Monopoly) go a step further with their own internal side
+rail for secondary info — round log, team chat, play log — next to the main
+board/action area instead of stacked below it, so the wide desktop column
+isn't just a tall single strip of stuff to scroll through.
 
 **Sound**: every game that can meaningfully use sound effects has them — card
 plays, buzzers, reveals, shots, wins, and so on. There are no audio files to

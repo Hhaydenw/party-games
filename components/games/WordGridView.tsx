@@ -250,6 +250,7 @@ export default function WordGridView({
   }
 
   return (
+    <div className="grid w-full gap-5 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-start">
     <div className="flex flex-col items-center gap-5">
       <div className="flex flex-wrap items-center justify-center gap-4 text-sm">
         <span className={view.isYourTurn ? "font-bold text-gold" : "text-slate-400"}>
@@ -475,15 +476,16 @@ export default function WordGridView({
           )}
         </div>
       )}
+    </div>
 
-      <div className="card-surface w-full max-w-2xl rounded-2xl p-3">
-        <p className="mb-1.5 text-xs font-semibold text-slate-400">Play log</p>
-        <div className="flex max-h-32 flex-col-reverse gap-1 overflow-y-auto text-xs text-slate-400">
-          {[...view.log].reverse().map((line, i) => (
-            <p key={i}>{line}</p>
-          ))}
-        </div>
+    <aside className="card-surface rounded-2xl p-3 xl:sticky xl:top-4">
+      <p className="mb-1.5 text-xs font-semibold text-slate-400">Play log</p>
+      <div className="flex max-h-64 flex-col-reverse gap-1 overflow-y-auto text-xs text-slate-400 xl:max-h-[calc(100vh-8rem)]">
+        {[...view.log].reverse().map((line, i) => (
+          <p key={i}>{line}</p>
+        ))}
       </div>
+    </aside>
     </div>
   );
 }

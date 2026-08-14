@@ -121,6 +121,7 @@ export default function LuckySpinView({
   }
 
   return (
+    <div className="grid w-full gap-6 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-start">
     <div className="flex flex-col items-center gap-6">
       <div className="text-center">
         <p className="text-xs uppercase tracking-widest text-slate-500">
@@ -253,12 +254,13 @@ export default function LuckySpinView({
           {view.phase === "roundEnd" && !isHost && <p className="text-sm text-slate-400">Waiting for the host…</p>}
         </div>
       )}
+    </div>
 
-      <div className="rounded-xl bg-black/20 p-3 text-xs text-slate-400">
-        {view.roundLog.map((line, i) => (
-          <p key={i}>{line}</p>
-        ))}
-      </div>
+    <aside className="rounded-xl bg-black/20 p-3 text-xs text-slate-400 xl:sticky xl:top-4">
+      {view.roundLog.map((line, i) => (
+        <p key={i}>{line}</p>
+      ))}
+    </aside>
     </div>
   );
 }
