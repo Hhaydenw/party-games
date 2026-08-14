@@ -242,16 +242,16 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   }
   function enterAiming() {
     if (!ready || submittedRef.current || pendingCamera || aimingRef.current) {
-      console.log("[StreetSnap] enterAiming() blocked —", { ready, submitted: submittedRef.current, hasPending: Boolean(pendingCamera), alreadyAiming: aimingRef.current });
+      console.log(`[StreetSnap] t=${performance.now().toFixed(1)} enterAiming() blocked —`, { ready, submitted: submittedRef.current, hasPending: Boolean(pendingCamera), alreadyAiming: aimingRef.current });
       return;
     }
-    console.log("[StreetSnap] entering aiming mode");
+    console.log(`[StreetSnap] t=${performance.now().toFixed(1)} entering aiming mode`);
     setAiming(true);
     setClickToGo(false);
   }
   function exitAiming() {
     if (!aimingRef.current) return;
-    console.log("[StreetSnap] exiting aiming mode");
+    console.log(`[StreetSnap] t=${performance.now().toFixed(1)} exiting aiming mode`);
     setAiming(false);
     setClickToGo(true);
   }
@@ -260,7 +260,10 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     // hitting Escape) always exits aiming, even if the cursor's drifted
     // outside the panorama while held.
     function onWindowMouseUp(e: MouseEvent) {
-      if (e.button === 2) exitAiming();
+      if (e.button === 2) {
+        console.log(`[StreetSnap] t=${performance.now().toFixed(1)} window-level mouseup capture fired, button =`, e.button);
+        exitAiming();
+      }
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") exitAiming();
@@ -438,18 +441,18 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         // blocked that way. This is also almost certainly why the overlay
         // never appeared before — it was listening in the bubble phase.
         onContextMenuCapture={(e) => {
-          console.log("[StreetSnap] contextmenu capture fired");
+          console.log(`[StreetSnap] t=${performance.now().toFixed(1)} contextmenu capture fired`);
           e.preventDefault();
         }}
         onMouseDownCapture={(e) => {
-          console.log("[StreetSnap] mousedown capture fired, button =", e.button);
+          console.log(`[StreetSnap] t=${performance.now().toFixed(1)} mousedown capture fired, button =`, e.button);
           if (e.button === 2) {
             e.preventDefault();
             enterAiming();
           }
         }}
         onMouseUpCapture={(e) => {
-          console.log("[StreetSnap] mouseup capture fired, button =", e.button);
+          console.log(`[StreetSnap] t=${performance.now().toFixed(1)} mouseup capture fired, button =`, e.button);
           if (e.button === 2) exitAiming();
         }}
         onClickCapture={() => {
