@@ -254,11 +254,16 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   Spin for a dollar value, guess a consonant — right guesses reveal it and
   let you spin again, a miss passes your turn. Buy a vowel for $250 any time
   it's your turn, or solve the puzzle outright; whoever solves banks that
-  round's earnings. A smaller wheel (16 wedges vs. the real show's ~24) with
-  the same flavor — mostly cash, occasional Bankrupt/Lose a Turn traps.
+  round's earnings. A real wedge-by-wedge wheel (16 wedges vs. the real
+  show's ~24, same flavor — mostly cash, occasional Bankrupt/Lose a Turn
+  traps) spins and rotates to land exactly on the wedge the server actually
+  picked, rather than just a plain spinning circle showing the resulting
+  amount. The puzzle board is a navy game-show board (styled like Family
+  Feud's) with letter tiles that wrap onto new rows at word boundaries
+  instead of needing to scroll a single long line sideways.
 - **Category Dash** is an original Scattergories-style word race (original
   category list, same "written fresh" approach as the other party games).
-  Each round gets a random letter and 6 categories; everyone races to write
+  Each round gets a random letter and 10 categories; everyone races to write
   one word/phrase per category starting with that letter before the timer
   runs out. There's no dictionary check — validity is entirely peer-judged,
   same as playing at a table: unique answers score 2, answers two or more

@@ -1,4 +1,5 @@
 import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/types";
+import { substituteNames } from "@/lib/games/logNames";
 
 // A Wheel-of-Fortune-style letter-guessing game (original name/content, not
 // affiliated with or copied from any TV show): spin for a dollar value,
@@ -13,8 +14,12 @@ const DEFAULT_ROUNDS = 5;
 
 // Dollar segments plus two penalty segments — a smaller wheel than the real
 // show's ~24 wedges, but the same flavor (mostly cash, occasional trap).
-type WheelSegment = number | "BANKRUPT" | "LOSE_TURN";
-const WHEEL: WheelSegment[] = [500, 600, 700, 800, 300, 900, 400, 650, "BANKRUPT", 750, 850, "LOSE_TURN", 550, 300, 400, 600];
+export type WheelSegment = number | "BANKRUPT" | "LOSE_TURN";
+// Exported (as a real value, not just a type) so the client can render an
+// actual wheel with these exact wedges in this exact order, and rotate it
+// to the specific wedge the server picked rather than just displaying the
+// resulting dollar amount in a spinning circle.
+export const WHEEL: WheelSegment[] = [500, 600, 700, 800, 300, 900, 400, 650, "BANKRUPT", 750, 850, "LOSE_TURN", 550, 300, 400, 600];
 
 interface PuzzleDef {
   category: string;
@@ -144,6 +149,7 @@ export interface LuckySpinState {
   phase: LuckySpinPhase;
   currentSegmentValue: number | null;
   lastSpinResult: WheelSegment | null;
+  lastSpinIndex: number | null;
   roundLog: string[];
   lastRoundResult: { winnerId: PlayerId | null; phrase: string; reason: string } | null;
 }
@@ -156,7 +162,7 @@ export interface LuckySpinView {
   roundIndex: number;
   totalRounds: number;
   category: string;
-  display: string; // e.g. "B _ T T E R   L A T E ..." with blanks for unguessed letters
+  boardWords: string[][]; // each word's letters, "_" for unguessed
   revealedPhrase: string | null; // full phrase, once solved/round over
   guessedLetters: string[];
   roundEarnings: { playerId: PlayerId; amount: number }[];
@@ -164,6 +170,7 @@ export interface LuckySpinView {
   phase: LuckySpinPhase;
   currentSegmentValue: number | null;
   lastSpinResult: WheelSegment | null;
+  lastSpinIndex: number | null;
   canBuyVowel: boolean;
   roundLog: string[];
   lastRoundResult: LuckySpinState["lastRoundResult"];
@@ -176,12 +183,13 @@ export type LuckySpinAction =
   | { type: "solve"; text: string }
   | { type: "advance" };
 
-function buildDisplay(phrase: string, guessedLetters: string[]): string {
+// Structured per-word/per-letter board data (word breaks preserved) instead
+// of a single pre-formatted ASCII string — lets the client wrap the board
+// onto multiple rows at word boundaries instead of needing to horizontally
+// scroll a single long line.
+function buildBoardWords(phrase: string, guessedLetters: string[]): string[][] {
   const letters = new Set(guessedLetters);
-  return phrase
-    .split("")
-    .map((c) => (c === " " ? "   " : /[A-Z]/.test(c) ? (letters.has(c) ? c : "_") : c))
-    .join(" ");
+  return phrase.split(" ").map((word) => word.split("").map((c) => (letters.has(c) ? c : "_")));
 }
 
 function startRound(state: LuckySpinState, roundIndex: number): LuckySpinState {
@@ -198,6 +206,7 @@ function startRound(state: LuckySpinState, roundIndex: number): LuckySpinState {
     phase: "playing",
     currentSegmentValue: null,
     lastSpinResult: null,
+    lastSpinIndex: null,
     roundLog: [`Round ${roundIndex + 1}: category is "${puzzle.category}"`],
     lastRoundResult: null,
   };
@@ -238,6 +247,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       phase: "playing",
       currentSegmentValue: null,
       lastSpinResult: null,
+      lastSpinIndex: null,
       roundLog: [],
       lastRoundResult: null,
     };
@@ -251,7 +261,8 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       if (state.phase !== "playing") throw new GameActionError("Not your turn to spin.");
       if (playerId !== currentPlayerId) throw new GameActionError("It's not your turn.");
       if (state.currentSegmentValue !== null) throw new GameActionError("You already spun — guess a consonant, buy a vowel, or solve.");
-      const segment = WHEEL[Math.floor(Math.random() * WHEEL.length)]!;
+      const segmentIndex = Math.floor(Math.random() * WHEEL.length);
+      const segment = WHEEL[segmentIndex]!;
 
       if (segment === "BANKRUPT") {
         const roundEarnings = { ...state.roundEarnings, [currentPlayerId]: 0 };
@@ -259,6 +270,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
           ...state,
           roundEarnings,
           lastSpinResult: segment,
+          lastSpinIndex: segmentIndex,
           ...passTurn(state),
           roundLog: [...state.roundLog, `${currentPlayerId} spun BANKRUPT and loses this round's earnings!`].slice(-30),
         };
@@ -267,6 +279,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
         return {
           ...state,
           lastSpinResult: segment,
+          lastSpinIndex: segmentIndex,
           ...passTurn(state),
           roundLog: [...state.roundLog, `${currentPlayerId} spun Lose a Turn.`].slice(-30),
         };
@@ -275,6 +288,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
         ...state,
         currentSegmentValue: segment,
         lastSpinResult: segment,
+        lastSpinIndex: segmentIndex,
         roundLog: [...state.roundLog, `${currentPlayerId} spun $${segment}.`].slice(-30),
       };
     }
@@ -363,7 +377,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
 
     throw new GameActionError("Unknown action.");
   },
-  getPlayerView(state, playerId) {
+  getPlayerView(state, playerId, players) {
     const currentPlayerId = state.order[state.turnIndex]!;
     const revealed = state.phase === "roundEnd" || state.phase === "finished";
     return {
@@ -374,7 +388,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       roundIndex: state.roundIndex,
       totalRounds: state.totalRounds,
       category: state.category,
-      display: buildDisplay(state.phrase, state.guessedLetters),
+      boardWords: buildBoardWords(state.phrase, state.guessedLetters),
       revealedPhrase: revealed ? state.phrase : null,
       guessedLetters: state.guessedLetters,
       roundEarnings: state.playerIds.map((pid) => ({ playerId: pid, amount: state.roundEarnings[pid] ?? 0 })),
@@ -382,8 +396,9 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       phase: state.phase,
       currentSegmentValue: state.currentSegmentValue,
       lastSpinResult: state.lastSpinResult,
+      lastSpinIndex: state.lastSpinIndex,
       canBuyVowel: (state.roundEarnings[currentPlayerId] ?? 0) >= VOWEL_COST,
-      roundLog: state.roundLog.slice(-8),
+      roundLog: substituteNames(state.roundLog.slice(-8), state.order, players),
       lastRoundResult: state.lastRoundResult,
     };
   },
