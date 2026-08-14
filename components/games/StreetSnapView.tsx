@@ -241,17 +241,12 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     }
   }
   function enterAiming() {
-    if (!ready || submittedRef.current || pendingCamera || aimingRef.current) {
-      console.log(`[StreetSnap] t=${performance.now().toFixed(1)} enterAiming() blocked —`, { ready, submitted: submittedRef.current, hasPending: Boolean(pendingCamera), alreadyAiming: aimingRef.current });
-      return;
-    }
-    console.log(`[StreetSnap] t=${performance.now().toFixed(1)} entering aiming mode`);
+    if (!ready || submittedRef.current || pendingCamera || aimingRef.current) return;
     setAiming(true);
     setClickToGo(false);
   }
   function exitAiming() {
     if (!aimingRef.current) return;
-    console.log(`[StreetSnap] t=${performance.now().toFixed(1)} exiting aiming mode`);
     setAiming(false);
     setClickToGo(true);
   }
@@ -260,10 +255,7 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     // hitting Escape) always exits aiming, even if the cursor's drifted
     // outside the panorama while held.
     function onWindowMouseUp(e: MouseEvent) {
-      if (e.button === 2) {
-        console.log(`[StreetSnap] t=${performance.now().toFixed(1)} window-level mouseup capture fired, button =`, e.button);
-        exitAiming();
-      }
+      if (e.button === 2) exitAiming();
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") exitAiming();
@@ -438,21 +430,15 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         // from bubbling back out to a normal handler on this wrapper, but
         // capture-phase listeners fire on the way *down* to the target,
         // before that internal handling ever runs, so they can't be
-        // blocked that way. This is also almost certainly why the overlay
-        // never appeared before — it was listening in the bubble phase.
-        onContextMenuCapture={(e) => {
-          console.log(`[StreetSnap] t=${performance.now().toFixed(1)} contextmenu capture fired`);
-          e.preventDefault();
-        }}
+        // blocked that way.
+        onContextMenuCapture={(e) => e.preventDefault()}
         onMouseDownCapture={(e) => {
-          console.log(`[StreetSnap] t=${performance.now().toFixed(1)} mousedown capture fired, button =`, e.button);
           if (e.button === 2) {
             e.preventDefault();
             enterAiming();
           }
         }}
         onMouseUpCapture={(e) => {
-          console.log(`[StreetSnap] t=${performance.now().toFixed(1)} mouseup capture fired, button =`, e.button);
           if (e.button === 2) exitAiming();
         }}
         onClickCapture={() => {
@@ -469,7 +455,18 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
           </div>
         )}
         {aiming && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          // z-[999]: the Street View widget injects its own internal DOM
+          // layers into containerRef (zoom controls, pegman, compass...)
+          // and those commonly carry an explicit inline z-index from
+          // Google's own script. Without an explicit z-index here, this
+          // div being later in the DOM isn't enough to guarantee it paints
+          // on top — an explicit-z-index sibling beats a z-index:auto one
+          // regardless of DOM order. This was confirmed live: the
+          // "aiming" state itself was toggling correctly (held true for
+          // the full ~1s the button was held) but the overlay never
+          // became visible, which is exactly what a stacking-context loss
+          // looks like rather than a state/timing bug.
+          <div className="pointer-events-none absolute inset-0 z-[999] flex items-center justify-center">
             <div className="absolute inset-6 rounded-lg border-2 border-white/30" />
             <div className="relative h-20 w-20">
               <div className="absolute inset-0 rounded-full border-2 border-white/80" />

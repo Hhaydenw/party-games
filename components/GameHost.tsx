@@ -36,7 +36,16 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
             <button
               className="btn-secondary px-3 py-1.5 text-sm"
               title="Skip the current round's timer early"
-              onClick={() => sendAction({ type: "timeUp" })}
+              onClick={() => {
+                // This ends whatever timer is currently running *right now* —
+                // if that happens to be a voting window, it ends voting
+                // immediately with whatever votes (possibly zero) have been
+                // cast so far. A stray/early click here has no undo, so
+                // confirm rather than silently cutting voting short.
+                if (window.confirm("Skip the current timer and move on immediately? If voting is in progress, this ends it right now — anyone who hasn't voted yet won't get to.")) {
+                  sendAction({ type: "timeUp" });
+                }
+              }}
             >
               ⏭ Skip round
             </button>
