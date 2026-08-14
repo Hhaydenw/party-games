@@ -16,6 +16,7 @@ import LuckySpinView from "@/components/games/LuckySpinView";
 import CategoryDashView from "@/components/games/CategoryDashView";
 import WordGridView from "@/components/games/WordGridView";
 import ColorMatchView from "@/components/games/ColorMatchView";
+import StreetSnapView from "@/components/games/StreetSnapView";
 
 // Dispatches a game's view to its component, shared by GameHost (while
 // playing) and FinishedBanner (frozen on the final tick after the game
@@ -65,6 +66,8 @@ export default function GameView({
       return <WordGridView view={view as any} onAction={onAction} meId={meId} players={players} />;
     case "color-match":
       return <ColorMatchView view={view as any} onAction={onAction} meId={meId} players={players} />;
+    case "street-snap":
+      return <StreetSnapView view={view as any} onAction={onAction} meId={meId} players={players} />;
     default:
       return null;
   }

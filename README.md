@@ -7,7 +7,7 @@ invite link, everyone picks a display name, and you play together in real time.
 
 The platform (rooms, invite links, display names, lobby, reconnect) is built so
 new games drop in as self-contained plugins without touching anything else.
-Fifteen games are fully implemented:
+Sixteen games are fully implemented:
 
 | Game | Category | Players |
 |---|---|---|
@@ -22,6 +22,7 @@ Fifteen games are fully implemented:
 | **Lucky Spin** (Wheel of Fortune-style) | 📱 Party | 2–6 |
 | **Word Grid** (Scrabble-style) | 🎲 Board | 2–4 |
 | **Color Match** | 📱 Party | 2–12 |
+| **Street Snap** (photo-guessing, needs setup — see below) | 📱 Party | 2–8 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
 | **Paddle Battle** (Pong-style) | 📱 Party (real-time) | 2 |
 | **The Game of Life** | 🎲 Board | 2–6 |
@@ -319,6 +320,37 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   since RGB distance alone judges some very-different-looking colors as
   deceptively "close." Colors are randomized in HSL space (not raw RGB) so
   rounds land on distinguishable colors instead of muddy near-greys.
+- **Street Snap** is a GeoGuessr-style *photo* game — everyone lands at the
+  same starting point in a real, random city, explores on foot for a few
+  minutes using [MapillaryJS](https://mapillary.github.io/mapillary-js/)
+  (free, crowd-sourced street-level imagery, not Google Street View — see
+  below for why), and each player "takes" exactly one photo before
+  everyone votes on their favorite. **Important design detail**: a "photo"
+  here is never an actual captured/downloaded image — it's the *camera
+  state* (which image, which direction and zoom you'd framed) at the
+  moment you hit the shutter, saved and then replayed live through a
+  fresh viewer at voting time. Two real constraints drove that: browsers
+  block `canvas.toDataURL()` on imagery tiles served without permissive
+  CORS headers (the common case, and true of Street View too — the "just
+  screenshot it" version of this game likely isn't implementable against
+  *any* provider), and extracting/storing imagery outside a provider's own
+  viewer risks violating their terms of use. Replaying a saved camera state
+  sidesteps both, since nothing is ever exported — Mapillary's own viewer
+  is what's always doing the actual rendering, live, for both the
+  photographer and the voters. Coverage is real-world and crowd-sourced,
+  so it's uneven — a curated list of ~25 major cities
+  (`lib/games/streetSnapCities.ts`) with usually-decent coverage is used
+  instead of a uniformly random point on Earth, and a round that can't find
+  imagery near its first pick quietly retries a different spot/city rather
+  than starting somewhere empty. **Needs setup**: a free Mapillary access
+  token (see below) — without one, the game fails to start with a clear
+  message instead of a crash, and every other game keeps working normally.
+  This is also the one feature in the whole app that couldn't be verified
+  the way everything else here was — its engine logic (city-picking
+  retries, round/vote state machine, scoring) has real automated tests
+  like every other game, but the live 3D imagery viewer itself needs an
+  actual browser and a real token to see rendered, which wasn't available
+  while building it.
 
 ### Family Feud content note
 
@@ -340,6 +372,24 @@ npm run dev
 
 Open **http://localhost:3000**. Create a room, then share the room code or the
 `/room/CODE` link with whoever's in the same session.
+
+### Optional: enabling Street Snap
+
+Every other game here works with zero setup — no accounts, no API keys.
+**Street Snap** is the one exception: it needs a free Mapillary access
+token for its street imagery.
+
+1. Sign in at [mapillary.com](https://www.mapillary.com) and register an app
+   at [mapillary.com/dashboard/developers](https://www.mapillary.com/dashboard/developers)
+   to get a client access token (starts with `MLY|`). No billing/credit
+   card required — this is a genuinely free tier, not a trial.
+2. Create a `.env.local` file in the project root:
+   ```
+   MAPILLARY_TOKEN=MLY|your-token-here
+   ```
+3. Restart the dev server (`npm run dev`). Street Snap will now appear as a
+   playable option; without a token it still shows up in the game list but
+   fails to start with a clear explanation instead of crashing the room.
 
 ## Playing with friends over the internet
 
@@ -367,6 +417,10 @@ that rules out pure serverless hosts like Vercel's default deploy. Easiest optio
   Node service. Works out of the box with this repo.
 - **A VPS**: `npm run build`, then run `npm start` behind a reverse proxy (Caddy/Nginx)
   with TLS, e.g. via `pm2` or a systemd service so it survives reboots.
+
+If you want Street Snap to work in production too, set `MAPILLARY_TOKEN` as an
+environment variable in your host's dashboard (Render/Railway/Fly all have one) —
+same free token from the setup section above, nothing extra to configure.
 
 Room state currently lives in memory on the server process — restarting the server
 clears all active rooms. That's fine for casual game nights; if you want rooms to
