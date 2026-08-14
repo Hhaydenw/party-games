@@ -166,8 +166,23 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     // an unexplained black box on screen — most likely causes are a bad/
     // scoped-wrong token or no network access to Mapillary's CDN.
     const stallTimer = setTimeout(() => {
-      if (!cancelled) setLoadError((prev) => prev ?? "Still loading after 12s — check the browser console, and that your Mapillary token is valid.");
+      if (!cancelled) {
+        console.warn("[StreetSnap] mapillary-js never fired 'image' or 'load' within 12s for", view.startImageId);
+        setLoadError((prev) => prev ?? "Still loading after 12s — check the browser console, and that your Mapillary token is valid.");
+      }
     }, 12_000);
+    // "load" (overall viewer/asset load) turned out to be an unreliable
+    // signal in practice — it can take much longer than the current image
+    // actually needs, or not fire at all, even once the photo is visibly
+    // ready. "image" (the viewer's current image has been set) fires as
+    // soon as the requested photo is actually showing, so readiness is now
+    // gated on whichever of the two fires first.
+    const markReady = () => {
+      if (cancelled) return;
+      clearTimeout(stallTimer);
+      setReady(true);
+      setLoadError(null);
+    };
 
     (async () => {
       try {
@@ -176,16 +191,13 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         const viewer = new Viewer({ container: containerRef.current, accessToken: view.accessToken, imageId: view.startImageId });
         viewer.on("image", (e) => {
           currentImageIdRef.current = e.image.id;
+          markReady();
         });
-        viewer.on("load", () => {
-          if (cancelled) return;
-          clearTimeout(stallTimer);
-          setReady(true);
-          setLoadError(null);
-        });
+        viewer.on("load", markReady);
         detachResize = attachResizeObserver(containerRef.current, viewer);
         viewerRef.current = viewer;
       } catch (err) {
+        console.error("[StreetSnap] failed to construct viewer:", err);
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Couldn't load street imagery.");
       }
     })();
@@ -297,8 +309,13 @@ function VotingPanel({
         const { Viewer } = await import("mapillary-js");
         if (cancelled || !containerRef.current || !current.camera) return;
         const viewer = new Viewer({ container: containerRef.current, accessToken: view.accessToken, imageId: current.camera.imageId });
-        viewer.on("load", () => {
-          if (cancelled) return;
+        // "load" alone turned out to be an unreliable readiness signal (see
+        // ExploringPanel's comment) — apply the saved framing on whichever
+        // of "image"/"load" fires first, guarded so it only runs once.
+        let applied = false;
+        const applyFraming = () => {
+          if (cancelled || applied) return;
+          applied = true;
           try {
             viewer.setCenter(current.camera!.center);
             viewer.setZoom(current.camera!.zoom);
@@ -306,7 +323,9 @@ function VotingPanel({
             // best-effort — worst case the framing isn't restored exactly
           }
           setReady(true);
-        });
+        };
+        viewer.on("image", applyFraming);
+        viewer.on("load", applyFraming);
         // Read-only: no walking/looking around someone else's shot, just
         // display it as they framed it. Attribution stays on, since this is
         // community-contributed imagery.
@@ -319,9 +338,10 @@ function VotingPanel({
         }
         detachResize = attachResizeObserver(containerRef.current, viewer);
         viewerRef.current = viewer;
-      } catch {
+      } catch (err) {
         // leave `ready` false — panel shows a loading state indefinitely,
         // which is an acceptable degraded state for a single photo
+        console.error("[StreetSnap] voting viewer failed to load:", err);
       }
     })();
     return () => {
