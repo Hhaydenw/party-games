@@ -203,8 +203,21 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
 - **Tank Arena**, **Paddle Battle**, and **Void Raiders** are the real-time
   games here — everyone else is turn-based. All three run on the server's
   physics tick loop (see [How it's built](#how-its-built)) rather than
-  reacting only to discrete moves. Tank Arena: WASD to move, aim/shoot with
-  the mouse, solo free-for-all or 2 teams. Paddle Battle: a two-player
+  reacting only to discrete moves. Tank Arena is a Wii Play *Tanks!*-style
+  maze battle (original map layout, not a copy of any specific commercial
+  game's exact grid — see `lib/games/tanks.ts`): WASD to move, aim/shoot
+  with the mouse, E to drop a mine, solo free-for-all or 2 teams. It plays
+  very differently from a typical twin-stick shooter on purpose: it's one
+  hit and you're out (no health bar), you can only have one shell in flight
+  at a time (no rapid-fire spam — land or lose your shot before you can
+  fire again), and shells ricochet off a solid wall once before detonating,
+  so trick shots around corners are a real tactic. Some walls are
+  destructible (crack after one hit, break on the second) and mines arm a
+  moment after you drop them, detonate on proximity or if a shell hits
+  them, and catch anyone nearby — including you, if you wander back onto
+  your own. The maze layout was checked with a standalone reachability
+  script (every spawn can always reach every other spawn, no wall sits
+  inside a spawn's safety zone) rather than eyeballed. Paddle Battle: a two-player
   Pong-style paddle-and-ball game, W/S or ↑/↓ to move, first to the target
   score wins — ball speed ramps up with each rally and the bounce angle
   depends on where it hits your paddle. Void Raiders: a Galaga/Space
