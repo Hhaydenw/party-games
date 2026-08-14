@@ -359,11 +359,14 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   each photo so far, updating in real time as votes come in during voting
   itself rather than only being revealed once everyone's done. The same
   grid is reused, read-only, for the round-end results screen. There's also
-  a **camera-viewfinder mode**: right-click the street view to arm it (a
-  crosshair overlay appears and normal click-to-walk navigation is
-  suspended so a click can't do both at once), left-click to snap, right-
-  click again or Escape to cancel — purely additive, the always-visible
-  shutter button still works the normal way too. After snapping, there's a
+  a **camera-viewfinder mode**: *hold* right-click on the street view to
+  arm it (a crosshair overlay appears and normal click-to-walk navigation
+  is suspended so a click can't do both at once) — left-click while still
+  holding it to snap, or release right-click (or hit Escape) to cancel
+  without taking anything. It's a genuine hold, not a toggle: left-click
+  does nothing special unless right-click is actively held down. Snapping
+  plays a synthesized camera shutter sound. Purely additive — the always-
+  visible shutter button still works the normal way too. After snapping, there's a
   **review step** before it's actually submitted: pick from a handful of
   filter presets (grayscale, sepia, vintage, cool, warm, vivid, noir — CSS
   filters, not canvas pixel manipulation) and drag-to-reposition/zoom-to-

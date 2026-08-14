@@ -22,7 +22,8 @@ export type SoundName =
   | "explosion"
   | "hit"
   | "turn"
-  | "tilePlace";
+  | "tilePlace"
+  | "shutter";
 
 interface SoundSettings {
   muted: boolean;
@@ -165,6 +166,15 @@ const RECIPES: Record<SoundName, (ac: AudioContext, out: GainNode, t0: number) =
   tilePlace: (ac, out, t0) => {
     noiseBurst(ac, out, t0, 0.04, { peak: 0.22, lowpass: 1800 });
     tone(ac, out, 180, t0, 0.05, { type: "triangle", peak: 0.15, sweepTo: 90 });
+  },
+  // A two-part camera shutter: a sharp high "click" (the mirror/aperture)
+  // immediately followed by a lower, slightly softer "clack" (the shutter
+  // closing) a beat later — the classic DSLR-ish snap sound.
+  shutter: (ac, out, t0) => {
+    noiseBurst(ac, out, t0, 0.02, { peak: 0.3, lowpass: 5000 });
+    tone(ac, out, 1400, t0, 0.02, { type: "square", peak: 0.15 });
+    noiseBurst(ac, out, t0 + 0.05, 0.03, { peak: 0.22, lowpass: 2200 });
+    tone(ac, out, 500, t0 + 0.05, 0.04, { type: "square", peak: 0.12, sweepTo: 200 });
   },
 };
 

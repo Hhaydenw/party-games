@@ -222,9 +222,16 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
 
   // Camera-viewfinder overlay: right-click arms it (and suspends normal
   // click-to-walk navigation, so a left click can't accidentally do both),
-  // left-click snaps, right-click again or Escape cancels. Purely additive
-  // — the always-visible shutter button below still works regardless.
+  // Left-click only takes a photo while right-click is *held down* — not a
+  // toggle. Holding right-click shows the crosshair overlay and suspends
+  // normal click-to-walk navigation (so a left-click can't do both at
+  // once); releasing right-click (anywhere, even outside the panorama —
+  // tracked on the window, not just this element) goes straight back to
+  // normal navigation, no photo taken. Purely additive — the always-visible
+  // shutter button below still works regardless.
   const [aiming, setAiming] = useState(false);
+  const aimingRef = useRef(false);
+  aimingRef.current = aiming;
 
   function setClickToGo(enabled: boolean) {
     try {
@@ -234,23 +241,33 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     }
   }
   function enterAiming() {
-    if (!ready || submittedRef.current || pendingCamera) return;
+    if (!ready || submittedRef.current || pendingCamera || aimingRef.current) return;
     setAiming(true);
     setClickToGo(false);
   }
   function exitAiming() {
+    if (!aimingRef.current) return;
     setAiming(false);
     setClickToGo(true);
   }
   useEffect(() => {
-    if (!aiming) return;
+    // Window-level listeners so releasing the right mouse button (or
+    // hitting Escape) always exits aiming, even if the cursor's drifted
+    // outside the panorama while held.
+    function onWindowMouseUp(e: MouseEvent) {
+      if (e.button === 2) exitAiming();
+    }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") exitAiming();
     }
+    window.addEventListener("mouseup", onWindowMouseUp);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mouseup", onWindowMouseUp);
+      window.removeEventListener("keydown", onKey);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiming]);
+  }, []);
 
   function captureCurrentCamera(): CameraState {
     const panorama = panoramaRef.current;
@@ -273,7 +290,7 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
 
   function startReview() {
     if (submittedRef.current || pendingCamera) return;
-    playSound("select");
+    playSound("shutter");
     setPendingCamera(captureCurrentCamera());
     setFilterId("none");
     setCropPos({ x: 50, y: 50 });
@@ -403,10 +420,15 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     <div className="flex w-full max-w-3xl flex-col items-center gap-3">
       <div
         className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black"
-        onContextMenu={(e) => {
-          e.preventDefault();
-          if (aiming) exitAiming();
-          else enterAiming();
+        onContextMenu={(e) => e.preventDefault()}
+        onMouseDown={(e) => {
+          if (e.button === 2) {
+            e.preventDefault();
+            enterAiming();
+          }
+        }}
+        onMouseUp={(e) => {
+          if (e.button === 2) exitAiming();
         }}
         onClick={() => {
           if (aiming) startReview();
@@ -432,13 +454,14 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
               <div className="absolute right-0 top-1/2 h-0.5 w-3 -translate-y-1/2 bg-white/80" />
             </div>
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white">
-              Click to snap 📸 · Right-click to cancel
+              Left-click to snap 📸 — release right-click to cancel
             </div>
           </div>
         )}
       </div>
       <p className="text-xs text-slate-500">
-        Drag to look around, click the arrows on the ground to walk — or right-click to aim, left-click to snap. © Google Street View.
+        Drag to look around, click the arrows on the ground to walk — or hold right-click to aim, left-click while
+        held to snap. © Google Street View.
       </p>
       <button className="btn-gold text-lg" onClick={startReview} disabled={!ready}>
         📸 Take this photo
