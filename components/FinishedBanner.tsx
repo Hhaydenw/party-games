@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PlayerInfo, RoomSummary } from "@/lib/types";
 import { useParty } from "@/lib/socketClient";
 import { listAvailableGames } from "@/lib/games/registry";
@@ -15,8 +15,29 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 // relevant to what was actually played — rather than the room's session-wide
 // win tally, which now lives in the lobby instead (see Lobby.tsx).
 export default function FinishedBanner({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
-  const { gameView, returnToLobby, startGame, nextSeriesGame } = useParty();
+  const { gameView, returnToLobby, startGame, nextSeriesGame, error, clearError } = useParty();
   const noop = () => {};
+
+  // Starting a new game/round can involve a real network fetch (Trivia,
+  // Name That Tune, ...) that occasionally fails (rate limiting, a flaky
+  // API) — `busy` disables the button meanwhile so a slow start doesn't
+  // read as unresponsive or invite a double-click race, and surfacing
+  // `error` here (previously only shown in the lobby/in-game screens, never
+  // on this one) means a failed "Play again" is never silent: without it,
+  // a failed restart just leaves the *previous* game's fully-revealed final
+  // round on screen looking like a fresh one that's already been answered.
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (error) setBusy(false);
+  }, [error]);
+  function handlePlayAgain() {
+    setBusy(true);
+    startGame();
+  }
+  function handleNextSeriesGame() {
+    setBusy(true);
+    nextSeriesGame();
+  }
 
   const inSeries = room.seriesActive;
   const isLastSeriesGame = inSeries && room.seriesIndex + 1 >= room.seriesQueue.length;
@@ -90,6 +111,12 @@ export default function FinishedBanner({ room, me }: { room: RoomSummary; me: Pl
         </div>
       )}
 
+      {error && (
+        <p className="w-full max-w-lg cursor-pointer rounded-xl bg-accent/10 px-4 py-2 text-sm text-accent" onClick={clearError}>
+          {error} (dismiss)
+        </p>
+      )}
+
       {me.isHost ? (
         <div className="flex flex-wrap justify-center gap-3">
           {inSeries ? (
@@ -98,14 +125,14 @@ export default function FinishedBanner({ room, me }: { room: RoomSummary; me: Pl
                 Back to lobby
               </button>
             ) : (
-              <button className="btn-primary" onClick={nextSeriesGame}>
-                ▶ Next game in series
+              <button className="btn-primary" disabled={busy} onClick={handleNextSeriesGame}>
+                {busy ? "Starting…" : "▶ Next game in series"}
               </button>
             )
           ) : (
             <>
-              <button className="btn-primary" onClick={startGame}>
-                🔁 Play again
+              <button className="btn-primary" disabled={busy} onClick={handlePlayAgain}>
+                {busy ? "Starting…" : "🔁 Play again"}
               </button>
               <button className="btn-secondary" onClick={returnToLobby}>
                 Back to lobby

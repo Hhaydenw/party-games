@@ -1,4 +1,5 @@
 import { GameActionError, GameDefinition, PlayerId } from "@/lib/types";
+import { substituteNames } from "@/lib/games/logNames";
 
 // A simplified digital take on The Game of Life: pick a car, spin, move
 // along a fixed track, collect salary at payday spaces, and resolve
@@ -363,7 +364,7 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
 
     throw new GameActionError("Unknown action.");
   },
-  getPlayerView(state, playerId) {
+  getPlayerView(state, playerId, players) {
     const current = state.order[state.turnIndex]!;
     const you = state.players[playerId]!;
     const takenPieces = new Set(Object.values(state.players).map((p) => p.piece).filter((p): p is string => p !== null));
@@ -395,7 +396,7 @@ export const life: GameDefinition<LifeState, LifeView, LifeAction> = {
       phase: state.phase,
       lastRoll: state.lastRoll,
       lastMovedPlayerId: state.lastMovedPlayerId,
-      log: state.log.slice(-8),
+      log: substituteNames(state.log.slice(-8), state.order, players),
     };
   },
   isGameOver(state) {

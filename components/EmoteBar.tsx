@@ -20,7 +20,14 @@ export default function EmoteBar() {
   const { emotes, sendEmote } = useParty();
   const [open, setOpen] = useState(false);
   const [floating, setFloating] = useState<FloatingEmote[]>([]);
-  const seenIds = useRef(new Set<string>());
+  // `emotes` lives in the shared socket context and keeps its last ~20
+  // entries across screen transitions (lobby -> game -> finished -> lobby),
+  // but each of those screens mounts its own fresh EmoteBar instance. Seed
+  // `seenIds` with whatever's already in the list right away (a lazy
+  // initializer, so it runs before the first paint) rather than starting it
+  // empty — otherwise every emote sent during the *previous* screen looks
+  // "new" the moment this instance mounts and they all float up at once.
+  const seenIds = useRef(new Set<string>(emotes.map((e) => e.id)));
 
   useEffect(() => {
     const fresh = emotes.filter((e) => !seenIds.current.has(e.id));
@@ -49,7 +56,10 @@ export default function EmoteBar() {
         {open && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="card-surface absolute right-0 z-20 mt-2 flex flex-wrap gap-1 rounded-2xl p-2 shadow-2xl" style={{ width: 176 }}>
+            <div
+              className="absolute right-0 z-20 mt-2 flex flex-wrap gap-1 rounded-2xl border border-white/10 bg-ink p-2 shadow-2xl"
+              style={{ width: 176 }}
+            >
               {EMOJI_OPTIONS.map((emoji) => (
                 <button
                   key={emoji}

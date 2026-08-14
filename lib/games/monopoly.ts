@@ -1,4 +1,5 @@
 import { GameActionError, GameDefinition, PlayerId } from "@/lib/types";
+import { substituteNames } from "@/lib/games/logNames";
 
 // A simplified digital Monopoly: full board, buying, rent (including
 // monopoly/house/hotel/railroad/utility rules), Chance & Community Chest,
@@ -802,7 +803,7 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
 
     throw new GameActionError("Unknown action.");
   },
-  getPlayerView(state, playerId) {
+  getPlayerView(state, playerId, players) {
     const current = state.order[state.turnIndex]!;
     const properties: MonopolyPropertyView[] = BOARD.map((tile, index) => {
       if (!isOwnable(tile)) return { index, name: tile.name, ownerId: null, houses: 0, mortgaged: false, currentRent: null };
@@ -863,7 +864,7 @@ export const monopoly: GameDefinition<MonopolyState, MonopolyView, MonopolyActio
           netWorth: netWorth(state, pid),
         };
       }),
-      log: state.log.slice(-10),
+      log: substituteNames(state.log.slice(-10), state.order, players),
     };
   },
   isGameOver(state) {

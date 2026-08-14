@@ -1,5 +1,6 @@
 import { GameDefinition, GameOptions, PlayerId } from "@/lib/types";
 import { assignTeams } from "./teamAssign";
+import { substituteNames } from "@/lib/games/logNames";
 
 // A real-time top-down tank battle in a Wii Play "Tanks!"-style maze arena:
 // WASD to move, aim/shoot with the mouse, drop mines with E. Unlike every
@@ -625,7 +626,7 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
 
     return { ...state, players, bullets: survivingBullets, mines: survivingMines, walls, log: log.slice(-30) };
   },
-  getPlayerView(state) {
+  getPlayerView(state, playerId, players) {
     return {
       hostId: state.hostId,
       mode: state.mode,
@@ -655,7 +656,7 @@ export const tanks: GameDefinition<TanksState, TanksView, TanksAction> = {
       }),
       bullets: state.bullets.map((b) => ({ id: b.id, team: b.team, x: b.x, y: b.y })),
       mines: state.mines.map((m) => ({ id: m.id, team: m.team, x: m.x, y: m.y, armed: Date.now() >= m.armAt })),
-      log: state.log.slice(-8),
+      log: substituteNames(state.log.slice(-8), state.order, players),
     };
   },
   isGameOver(state) {

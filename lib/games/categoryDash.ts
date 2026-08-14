@@ -64,11 +64,29 @@ const CATEGORY_BANK: string[] = [
   "Types of jobs at a restaurant",
   "Things you'd see at a zoo",
   "Card games",
+  "Things that make noise",
+  "Ice cream flavors",
+  "Things in a wallet or purse",
+  "Types of exercise",
+  "Fruits",
+  "Things with wheels",
+  "Halloween costumes",
+  "Things you'd find at a wedding",
+  "Types of soup",
+  "Things in a bathroom",
+  "Board game pieces or tokens",
+  "Things that are heavy",
+  "Types of hats",
+  "Things you'd bring camping",
+  "Musical genres",
+  "Things at an amusement park",
+  "Types of trucks",
+  "Things a superhero might wear",
 ];
 
-const CATEGORIES_PER_ROUND = 6;
+const CATEGORIES_PER_ROUND = 10;
 const DEFAULT_ROUNDS = 4;
-const DEFAULT_WRITE_MS = 90_000;
+const DEFAULT_WRITE_MS = 120_000; // 10 categories instead of 6 needs a bit more time, but not a lot more
 
 const usedCategories = new Set<string>();
 

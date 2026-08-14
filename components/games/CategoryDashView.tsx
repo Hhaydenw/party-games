@@ -36,6 +36,17 @@ export default function CategoryDashView({
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const firedTimeUp = useRef(false);
 
+  // The input's displayed value used to be bound straight to the server-
+  // echoed `view.yourDrafts`, sending an action on every keystroke — typing
+  // faster than the round trip could snap already-typed characters back to
+  // a stale echo, dropping letters. Local state is now the source of truth
+  // for what's on screen; the server copy is only used to seed it once per
+  // round (and as a fallback before you've typed anything locally).
+  const [localDrafts, setLocalDrafts] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setLocalDrafts({});
+  }, [view.roundIndex]);
+
   useEffect(() => {
     firedTimeUp.current = false;
     if (!view.writeEndsAt) {
@@ -64,6 +75,7 @@ export default function CategoryDashView({
   }, [view.phase]);
 
   function setDraft(category: string, text: string) {
+    setLocalDrafts((prev) => ({ ...prev, [category]: text }));
     onAction({ type: "setAnswer", category, text });
   }
 
@@ -90,7 +102,7 @@ export default function CategoryDashView({
                 className="input"
                 placeholder={`${view.letter}...`}
                 maxLength={40}
-                value={view.yourDrafts[category] ?? ""}
+                value={localDrafts[category] ?? view.yourDrafts[category] ?? ""}
                 onChange={(e) => setDraft(category, e.target.value)}
               />
             </label>

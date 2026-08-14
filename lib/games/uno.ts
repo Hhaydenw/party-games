@@ -1,4 +1,5 @@
 import { GameActionError, GameDefinition, PlayerId } from "@/lib/types";
+import { substituteNames } from "@/lib/games/logNames";
 
 export type UnoColor = "red" | "yellow" | "green" | "blue";
 export type UnoValue = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "skip" | "reverse" | "draw2" | "wild" | "wild4";
@@ -293,7 +294,7 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
 
     throw new GameActionError("Unknown action.");
   },
-  getPlayerView(state, playerId) {
+  getPlayerView(state, playerId, players) {
     const handCounts: Record<PlayerId, number> = {};
     for (const pid of state.order) handCounts[pid] = state.hands[pid]?.length ?? 0;
     return {
@@ -308,7 +309,7 @@ export const uno: GameDefinition<UnoState, UnoView, UnoAction> = {
       pendingDraw: state.pendingDraw,
       yourTurn: state.order[state.turnIndex] === playerId && !state.winnerId,
       winnerId: state.winnerId,
-      log: state.log.slice(-8),
+      log: substituteNames(state.log.slice(-8), state.order, players),
     };
   },
   isGameOver(state) {

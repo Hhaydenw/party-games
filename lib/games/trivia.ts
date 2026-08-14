@@ -87,22 +87,14 @@ interface TriviaQuestion {
   correctIndex: number;
 }
 
-async function fetchToken(): Promise<string | null> {
-  try {
-    const res = await fetch("https://opentdb.com/api_token.php?command=request");
-    if (!res.ok) return null;
-    const data = (await res.json()) as { response_code: number; token?: string };
-    return data.response_code === 0 && data.token ? data.token : null;
-  } catch {
-    return null;
-  }
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchQuestions(amount: number, category: string, difficulty: string, token: string | null): Promise<TriviaQuestion[]> {
+async function fetchQuestions(amount: number, category: string, difficulty: string): Promise<TriviaQuestion[]> {
   const params = new URLSearchParams({ amount: String(amount), type: "multiple" });
   if (category !== "any") params.set("category", category);
   if (difficulty !== "any") params.set("difficulty", difficulty);
-  if (token) params.set("token", token);
   try {
     const res = await fetch(`https://opentdb.com/api.php?${params.toString()}`);
     if (!res.ok) return [];
@@ -123,10 +115,22 @@ async function fetchQuestions(amount: number, category: string, difficulty: stri
   }
 }
 
+// No longer requests a session token first — that was a second network call
+// purely to get OpenTDB's own "don't repeat within this session" tracking,
+// which our own `usedQuestions` Set already provides, and it counts against
+// the same per-IP rate limit as the actual question fetch. Dropping it
+// halves the requests made per game start, which matters most exactly when
+// it used to bite: clicking "Play again" soon after finishing a game.
+// A transient rate-limit response (or any other empty result) gets one
+// short retry before giving up, rather than failing on the first hiccup.
 async function pickQuestions(totalRounds: number, category: string, difficulty: string): Promise<TriviaQuestion[]> {
-  const token = await fetchToken();
   // Ask for extra so we can filter out ones we've already served elsewhere.
-  const fetched = await fetchQuestions(Math.min(50, totalRounds + 15), category, difficulty, token);
+  const amount = Math.min(50, totalRounds + 15);
+  let fetched = await fetchQuestions(amount, category, difficulty);
+  if (fetched.length === 0) {
+    await wait(1200);
+    fetched = await fetchQuestions(amount, category, difficulty);
+  }
   const fresh = fetched.filter((q) => !usedQuestions.has(q.question));
   const pool = fresh.length >= totalRounds ? fresh : fetched; // fall back to repeats if the fresh pool is too small
   const chosen = pool.slice(0, totalRounds);

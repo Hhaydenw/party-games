@@ -1,4 +1,5 @@
 import { GameDefinition, GameOptions, PlayerId } from "@/lib/types";
+import { substituteNames } from "@/lib/games/logNames";
 
 // A real-time two-player Pong-style game. Like Tank Arena, this runs on the
 // server's tick loop (`tick`) rather than reacting only to discrete turns —
@@ -224,7 +225,7 @@ export const paddleBattle: GameDefinition<PaddleBattleState, PaddleBattleView, P
 
     return { ...state, paddles, ball };
   },
-  getPlayerView(state) {
+  getPlayerView(state, playerId, players) {
     return {
       hostId: state.hostId,
       arena: { width: ARENA_W, height: ARENA_H },
@@ -239,7 +240,7 @@ export const paddleBattle: GameDefinition<PaddleBattleState, PaddleBattleView, P
         return { id: p.id, side: p.side, y: p.y, score: p.score };
       }),
       ball: { x: state.ball.x, y: state.ball.y },
-      log: state.log.slice(-8),
+      log: substituteNames(state.log.slice(-8), state.order, players),
     };
   },
   isGameOver(state) {

@@ -7,7 +7,7 @@ invite link, everyone picks a display name, and you play together in real time.
 
 The platform (rooms, invite links, display names, lobby, reconnect) is built so
 new games drop in as self-contained plugins without touching anything else.
-Fifteen games are fully implemented:
+Fourteen games are fully implemented:
 
 | Game | Category | Players |
 |---|---|---|
@@ -23,7 +23,6 @@ Fifteen games are fully implemented:
 | **Word Grid** (Scrabble-style) | 🎲 Board | 2–4 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
 | **Paddle Battle** (Pong-style) | 📱 Party (real-time) | 2 |
-| **Void Raiders** (Galaga/Space Invaders-style) | 📱 Party (real-time) | 1–4 |
 | **The Game of Life** | 🎲 Board | 2–6 |
 | **Monopoly** | 🎲 Board | 2–6 |
 
@@ -200,8 +199,8 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   decade filter, so relevance comes from the query wording rather than
   certified chart data; a filter also screens out lullaby/karaoke/tribute-album
   covers that otherwise rank surprisingly high for generic "hits" searches.
-- **Tank Arena**, **Paddle Battle**, and **Void Raiders** are the real-time
-  games here — everyone else is turn-based. All three run on the server's
+- **Tank Arena** and **Paddle Battle** are the real-time
+  games here — everyone else is turn-based. Both run on the server's
   physics tick loop (see [How it's built](#how-its-built)) rather than
   reacting only to discrete moves. Tank Arena is a Wii Play *Tanks!*-style
   maze battle (original map layout, not a copy of any specific commercial
@@ -229,13 +228,7 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   real room players. Paddle Battle: a two-player
   Pong-style paddle-and-ball game, W/S or ↑/↓ to move, first to the target
   score wins — ball speed ramps up with each rally and the bounce angle
-  depends on where it hits your paddle. Void Raiders: a Galaga/Space
-  Invaders-style shooter, A/D or ←/→ to move, space or click/hold to fire at
-  a descending enemy formation that gets tougher each wave — real vector-drawn
-  ships and pixel-invader enemies (canvas paths, not plain circles/triangles),
-  color-coded and lightly animated per row — solo or
-  co-op/competitive up to 4 players sharing one arena, highest score when
-  time's up (or everyone's ships are destroyed) wins.
+  depends on where it hits your paddle.
 - **Wildest Answer** is an original Quiplash-style prompt-and-vote game (the
   prompts are written fresh for this app, not pulled from any commercial
   game — same approach as Family Feud's question bank). Each round, players
@@ -364,7 +357,7 @@ survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-me
 - **Real-time games**: a game can optionally implement `tick(state, dtMs)` and set
   `meta.tickIntervalMs`; `lib/rooms.ts` then runs that game's physics step on a
   timer (independent of player actions) and broadcasts whenever it changes state.
-  Tank Arena, Paddle Battle, and Void Raiders all use this — everything else
+  Tank Arena and Paddle Battle both use this — everything else
   reacts only to discrete player actions. Players stream continuous state
   (which keys are held, where the mouse is aiming) as regular actions; the
   tick loop is what actually moves things and resolves hits.
