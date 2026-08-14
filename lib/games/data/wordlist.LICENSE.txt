@@ -1,0 +1,9 @@
+This directory bundles the ENABLE ("Enhanced North American Benchmark
+Lexicon") word list, compiled by Alan Beale and explicitly released to the
+public domain for use in word games. Source:
+https://github.com/dolph/dictionary (a mirror of the original enable1.txt).
+
+wordlistData.ts is a filtered copy of enable1.txt — uppercased, deduplicated,
+and limited to words between 2 and 15 letters (the longest word that fits on
+Word Grid's 15x15 board), embedded as a plain string constant — used by
+lib/games/wordGrid.ts to validate word placements.

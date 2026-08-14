@@ -7,7 +7,7 @@ invite link, everyone picks a display name, and you play together in real time.
 
 The platform (rooms, invite links, display names, lobby, reconnect) is built so
 new games drop in as self-contained plugins without touching anything else.
-Fourteen games are fully implemented:
+Fifteen games are fully implemented:
 
 | Game | Category | Players |
 |---|---|---|
@@ -20,6 +20,7 @@ Fourteen games are fully implemented:
 | **Category Dash** (Scattergories-style) | 📱 Party | 2–12 |
 | **Price Check** (Price Is Right-style) | 📱 Party | 2–12 |
 | **Lucky Spin** (Wheel of Fortune-style) | 📱 Party | 2–6 |
+| **Word Grid** (Scrabble-style) | 🎲 Board | 2–4 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
 | **Paddle Battle** (Pong-style) | 📱 Party (real-time) | 2 |
 | **Void Raiders** (Galaga/Space Invaders-style) | 📱 Party (real-time) | 1–4 |
@@ -240,6 +241,35 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   it's your turn, or solve the puzzle outright; whoever solves banks that
   round's earnings. A smaller wheel (16 wedges vs. the real show's ~24) with
   the same flavor — mostly cash, occasional Bankrupt/Lose a Turn traps.
+- **Category Dash** is an original Scattergories-style word race (original
+  category list, same "written fresh" approach as the other party games).
+  Each round gets a random letter and 6 categories; everyone races to write
+  one word/phrase per category starting with that letter before the timer
+  runs out. There's no dictionary check — validity is entirely peer-judged,
+  same as playing at a table: unique answers score 2, answers two or more
+  players both wrote score 1 each, anything not starting with the round's
+  letter auto-scores 0, and anyone can **challenge** an answer they think
+  doesn't actually fit — if more than half the *other* players agree, it
+  scores 0. Skips the letters Q/U/X/Y/Z since they make most categories
+  nearly unplayable.
+- **Word Grid** is a Scrabble-style crossword tile game — an original board
+  layout and tile point values, not a copy of any specific commercial game's
+  exact grid (see `lib/games/wordGridBoard.ts`). Take turns laying tiles
+  from your 7-letter rack across the shared 15x15 board to spell words
+  crossword-style; double/triple letter and word squares multiply your
+  score, using your whole rack in one turn earns a 50-point bonus, and the
+  first play must cover the center square. Word validity is checked against
+  a bundled public-domain word list (the ENABLE word list — see
+  `lib/games/data/wordlist.LICENSE.txt`) rather than a live API, so a round
+  never depends on an external dictionary service staying up; it's loaded
+  via a dynamic import server-side only, so the ~1.6MB word list never gets
+  shipped to anyone's browser. The game ends when someone empties their rack
+  with an empty bag, or everyone passes in a row — either way, everyone's
+  leftover rack value counts against their score (and, if someone went out,
+  gets added to theirs). Known simplifications: no separate "challenge a
+  played word" step after the fact (only the placement is validated, live,
+  before it's accepted) and turn timers aren't enforced — it's pass-when-
+  ready, same as most turn-based games here.
 
 ### Family Feud content note
 
