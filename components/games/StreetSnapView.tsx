@@ -260,10 +260,15 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") exitAiming();
     }
-    window.addEventListener("mouseup", onWindowMouseUp);
+    // Capture phase (the `true` third argument), not bubble — the Street
+    // View widget's own internal canvas/drag handling can stop a mouse
+    // event from bubbling back up to us, but a capture-phase listener on
+    // window fires on the way *down*, before the event ever reaches that
+    // internal element, so it can't be blocked that way.
+    window.addEventListener("mouseup", onWindowMouseUp, true);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("mouseup", onWindowMouseUp);
+      window.removeEventListener("mouseup", onWindowMouseUp, true);
       window.removeEventListener("keydown", onKey);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -420,17 +425,24 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     <div className="flex w-full max-w-3xl flex-col items-center gap-3">
       <div
         className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black"
-        onContextMenu={(e) => e.preventDefault()}
-        onMouseDown={(e) => {
+        // Capture-phase (the "Capture" suffix) on all four — the Street
+        // View widget's own canvas/drag handling can stop these events
+        // from bubbling back out to a normal handler on this wrapper, but
+        // capture-phase listeners fire on the way *down* to the target,
+        // before that internal handling ever runs, so they can't be
+        // blocked that way. This is also almost certainly why the overlay
+        // never appeared before — it was listening in the bubble phase.
+        onContextMenuCapture={(e) => e.preventDefault()}
+        onMouseDownCapture={(e) => {
           if (e.button === 2) {
             e.preventDefault();
             enterAiming();
           }
         }}
-        onMouseUp={(e) => {
+        onMouseUpCapture={(e) => {
           if (e.button === 2) exitAiming();
         }}
-        onClick={() => {
+        onClickCapture={() => {
           if (aiming) startReview();
         }}
       >
