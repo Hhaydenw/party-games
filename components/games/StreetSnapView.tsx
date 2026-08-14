@@ -188,7 +188,12 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
       try {
         const { Viewer } = await import("mapillary-js");
         if (cancelled || !containerRef.current) return;
-        const viewer = new Viewer({ container: containerRef.current, accessToken: view.accessToken, imageId: view.startImageId });
+        // Deliberately *not* passing `imageId` here — that ties readiness to
+        // passive "image"/"load" events which may only fire on subsequent
+        // navigation, not for whatever image the viewer starts with. Calling
+        // `moveTo` explicitly and awaiting its promise is a direct,
+        // unambiguous "this specific image finished loading" signal instead.
+        const viewer = new Viewer({ container: containerRef.current, accessToken: view.accessToken });
         viewer.on("image", (e) => {
           currentImageIdRef.current = e.image.id;
           markReady();
@@ -196,8 +201,10 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         viewer.on("load", markReady);
         detachResize = attachResizeObserver(containerRef.current, viewer);
         viewerRef.current = viewer;
+        await viewer.moveTo(view.startImageId);
+        markReady();
       } catch (err) {
-        console.error("[StreetSnap] failed to construct viewer:", err);
+        console.error("[StreetSnap] failed to load viewer/image:", err);
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Couldn't load street imagery.");
       }
     })();
@@ -304,21 +311,25 @@ function VotingPanel({
     let detachResize: (() => void) | null = null;
     setReady(false);
     if (!current) return;
+    const stallTimer = setTimeout(() => {
+      if (!cancelled) console.warn("[StreetSnap] voting viewer never became ready within 12s for", current.camera?.imageId);
+    }, 12_000);
     (async () => {
       try {
         const { Viewer } = await import("mapillary-js");
         if (cancelled || !containerRef.current || !current.camera) return;
-        const viewer = new Viewer({ container: containerRef.current, accessToken: view.accessToken, imageId: current.camera.imageId });
-        // "load" alone turned out to be an unreliable readiness signal (see
-        // ExploringPanel's comment) — apply the saved framing on whichever
-        // of "image"/"load" fires first, guarded so it only runs once.
+        // See ExploringPanel's comment — constructing without an initial
+        // `imageId` and explicitly awaiting `moveTo` is a more reliable
+        // completion signal than passive "image"/"load" events.
+        const viewer = new Viewer({ container: containerRef.current, accessToken: view.accessToken });
         let applied = false;
         const applyFraming = () => {
-          if (cancelled || applied) return;
+          if (cancelled || applied || !current.camera) return;
           applied = true;
+          clearTimeout(stallTimer);
           try {
-            viewer.setCenter(current.camera!.center);
-            viewer.setZoom(current.camera!.zoom);
+            viewer.setCenter(current.camera.center);
+            viewer.setZoom(current.camera.zoom);
           } catch {
             // best-effort — worst case the framing isn't restored exactly
           }
@@ -338,6 +349,8 @@ function VotingPanel({
         }
         detachResize = attachResizeObserver(containerRef.current, viewer);
         viewerRef.current = viewer;
+        await viewer.moveTo(current.camera.imageId);
+        applyFraming();
       } catch (err) {
         // leave `ready` false — panel shows a loading state indefinitely,
         // which is an acceptable degraded state for a single photo
@@ -346,6 +359,7 @@ function VotingPanel({
     })();
     return () => {
       cancelled = true;
+      clearTimeout(stallTimer);
       detachResize?.();
       try {
         viewerRef.current?.remove();
