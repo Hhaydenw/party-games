@@ -342,7 +342,18 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   Replaying a saved camera state sidesteps both, since nothing is ever
   exported — Google's own viewer is what's always doing the actual
   rendering, live, for both the photographer and the voters, exactly like
-  normal Street View embedding anywhere else on the web. A curated list of
+  normal Street View embedding anywhere else on the web. The two phases use
+  different rendering for cost/reliability reasons, though: **exploring**
+  uses the real interactive Maps JavaScript API panorama (`clickToGo`,
+  drag-to-look-around, walking between panoramas), since that's the part
+  that's actually supposed to be interactive; **voting** uses a plain
+  static image (Street View Static API, matching the saved
+  pano/heading/pitch/zoom) instead of another live interactive viewer,
+  since nobody needs to walk around a photo someone else already framed —
+  that also avoids the biggest driver of API usage, which would otherwise
+  be every player loading a full interactive panorama for every *other*
+  player's photo each round (players × (players-1) live loads, just for
+  voting). A curated list of
   ~25 major cities (`lib/games/streetSnapCities.ts`) is used instead of a
   uniformly random point on Earth, and a round that can't find coverage
   near its first pick quietly retries a different spot/city — though

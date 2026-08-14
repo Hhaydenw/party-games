@@ -25,6 +25,27 @@ async function loadStreetView(apiKey: string): Promise<{ StreetViewPanorama: typ
   return { StreetViewPanorama: streetView.StreetViewPanorama, event: core.event };
 }
 
+// The Street View Static API's `fov` (degrees, 10-120, default 90) doesn't
+// map 1:1 to the JS API's `zoom` (roughly 0-5, no fixed upper bound) — this
+// is the commonly-used approximation (halving the field of view per zoom
+// level), close enough for a voting-display image that doesn't need to
+// pixel-match the interactive view exactly.
+function zoomToFov(zoom: number): number {
+  return Math.round(Math.max(10, Math.min(120, 180 / Math.pow(2, zoom))));
+}
+
+function buildStaticStreetViewUrl(apiKey: string, camera: CameraState): string {
+  const params = new URLSearchParams({
+    size: "1280x720",
+    pano: camera.pano,
+    heading: String(camera.heading),
+    pitch: String(camera.pitch),
+    fov: String(zoomToFov(camera.zoom)),
+    key: apiKey,
+  });
+  return `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`;
+}
+
 export default function StreetSnapView({
   view,
   onAction,
@@ -257,55 +278,8 @@ function VotingPanel({
   const votable = (view.photos ?? []).filter((p) => p.playerId !== meId);
   const [index, setIndex] = useState(0);
   const current = votable[Math.min(index, Math.max(0, votable.length - 1))];
-  const containerRef = useRef<HTMLDivElement>(null);
-  const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setReady(false);
-    if (!current?.camera) return;
-    const stallTimer = setTimeout(() => {
-      if (!cancelled) console.warn("[StreetSnap] voting panorama never became ready within 12s for", current.camera?.pano);
-    }, 12_000);
-    (async () => {
-      try {
-        const { StreetViewPanorama, event } = await loadStreetView(view.mapsApiKey);
-        if (cancelled || !containerRef.current || !current.camera) return;
-        // Fully locked, read-only: pov/zoom are passed straight into the
-        // constructor (unlike the exploring viewer, there's no need to
-        // apply them after the fact) and every interactive control is off
-        // — this is purely a display of exactly how they framed their shot.
-        const panorama = new StreetViewPanorama(containerRef.current, {
-          pano: current.camera.pano,
-          pov: { heading: current.camera.heading, pitch: current.camera.pitch },
-          zoom: current.camera.zoom,
-          disableDefaultUI: true,
-          clickToGo: false,
-          linksControl: false,
-          panControl: false,
-          zoomControl: false,
-          addressControl: false,
-          motionTracking: false,
-          motionTrackingControl: false,
-        });
-        panorama.addListener("status_changed", () => {
-          if (cancelled) return;
-          clearTimeout(stallTimer);
-          setReady(true);
-        });
-        panoramaRef.current = panorama;
-        requestAnimationFrame(() => requestAnimationFrame(() => event.trigger(panorama, "resize")));
-      } catch (err) {
-        console.error("[StreetSnap] voting viewer failed to load:", err);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      clearTimeout(stallTimer);
-      panoramaRef.current = null;
-    };
-  }, [current?.playerId, current?.camera?.pano, view.mapsApiKey]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => setLoaded(false), [current?.playerId]);
 
   function vote() {
     if (!current || view.yourVote) return;
@@ -319,9 +293,24 @@ function VotingPanel({
 
   return (
     <div className="flex w-full max-w-3xl flex-col items-center gap-3">
+      {/* Voting deliberately uses a plain static image (Street View Static
+          API) instead of a full interactive panorama — nobody needs to walk
+          around someone else's already-framed shot, and it means voting
+          doesn't multiply live interactive panorama loads by every other
+          player's photo count (which would otherwise scale as players ×
+          (players-1) per round, the single biggest driver of API usage). */}
       <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
-        <div ref={containerRef} className="absolute inset-0" />
-        {!ready && <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Loading photo…</div>}
+        {current?.camera && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={current.playerId}
+            src={buildStaticStreetViewUrl(view.mapsApiKey, current.camera)}
+            alt={`Photo by ${nameFor(current.playerId)}`}
+            className="absolute inset-0 h-full w-full object-cover"
+            onLoad={() => setLoaded(true)}
+          />
+        )}
+        {!loaded && <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Loading photo…</div>}
       </div>
       <div className="flex items-center gap-4">
         <button className="btn-secondary px-3 py-1.5 text-sm" onClick={() => setIndex((i) => (i - 1 + votable.length) % votable.length)} disabled={votable.length < 2}>
