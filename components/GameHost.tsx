@@ -57,6 +57,43 @@ function SkipRoundButton({ onConfirm }: { onConfirm: () => void }) {
 export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
   const { gameView, sendAction, error, clearError, returnToLobby } = useParty();
 
+  // Someone who joined mid-game never receives a game:view at all (see
+  // server/index.ts's broadcastRoomState) — building a safe, tailored view
+  // for a player id that wasn't part of the game when it started would
+  // mean auditing every single game's getPlayerView for how it handles an
+  // id it's never seen, which isn't a risk worth taking just to show a
+  // spectator the board. They still get the room chrome (chat, reactions,
+  // player list, scores) — just not the live per-game view itself.
+  if (me.isSpectator) {
+    return (
+      <main className="mx-auto flex min-h-screen w-full max-w-[1920px] flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6 lg:px-8">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="font-display text-2xl font-extrabold">🎉 Party Games</h1>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-400">
+              Room <span className="font-semibold tracking-[0.2em] text-gold">{room.code}</span>
+            </span>
+            <EmoteBar />
+            <SoundSettingsButton />
+          </div>
+        </header>
+        <div className="grid flex-1 gap-5 xl:grid-cols-[1fr_280px]">
+          <section className="card-surface flex min-w-0 flex-col items-center justify-center gap-2 rounded-3xl p-10 text-center">
+            <p className="text-lg font-semibold text-slate-300">👀 You're spectating</p>
+            <p className="max-w-sm text-sm text-slate-500">
+              A game's already in progress — you'll join in as a full player once it's back to the lobby. Chat and
+              reactions still work in the meantime.
+            </p>
+          </section>
+          <aside className="card-surface h-fit rounded-3xl p-4 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
+            <h3 className="mb-3 text-sm font-semibold text-slate-300">Players</h3>
+            <PlayerList players={room.players} meId={me.id} />
+          </aside>
+        </div>
+      </main>
+    );
+  }
+
   if (!gameView || gameView.gameId !== room.gameId) {
     return <main className="flex min-h-screen items-center justify-center text-slate-400">Loading game…</main>;
   }

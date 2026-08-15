@@ -39,6 +39,16 @@ function broadcastRoomState(io: Server<ClientToServerEvents, ServerToClientEvent
     if (!meta) continue;
     const socket = io.sockets.sockets.get(socketId);
     if (!socket) continue;
+    // A spectator isn't part of the game's own playerIds (they joined
+    // after createInitialState built that list from the real players),
+    // and every game's getPlayerView is written assuming its playerId
+    // argument is an actual participant — some do a plain lookup that
+    // would throw for an id it's never seen. Skipping the call entirely
+    // for spectators avoids depending on all ~20 games happening to
+    // handle an unrecognized id gracefully; they just don't get a
+    // game:view at all and the client shows a plain "spectating" screen.
+    const player = summary.players.find((p) => p.id === meta.playerId);
+    if (player?.isSpectator) continue;
     const gameView = roomManager.getPlayerGameView(code, meta.playerId);
     if (gameView) socket.emit("game:view", gameView);
     if (summary.status === "finished" && summary.gameId) {

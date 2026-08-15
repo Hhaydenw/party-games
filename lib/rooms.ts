@@ -180,7 +180,7 @@ class RoomManager {
     const playerId = nanoid(10);
     const token = nanoid(24);
     const resolvedColor = isValidAvatarColor(color) ? color : pickAvailableColor([]);
-    const player: InternalPlayer = { id: playerId, name: trimmed, connected: true, isHost: true, score: 0, color: resolvedColor, token };
+    const player: InternalPlayer = { id: playerId, name: trimmed, connected: true, isHost: true, score: 0, color: resolvedColor, token, isSpectator: false };
     const room: InternalRoom = {
       code,
       status: "lobby",
@@ -204,8 +204,13 @@ class RoomManager {
 
   joinRoom(code: string, name: string, color?: string): { playerId: PlayerId; token: string } {
     const room = this.getRoomOrThrow(code);
-    if (room.status !== "lobby") throw new RoomError("This room is mid-game. Wait for it to finish or ask the host to return to the lobby.");
     if (room.players.size >= 16) throw new RoomError("This room is full.");
+    // Joining while a game's already running doesn't get turned away
+    // anymore — it makes you a spectator instead: visible in the room,
+    // can chat/react, but doesn't take a player slot and can't act in the
+    // game. You're a normal player again automatically the next time the
+    // room's back in the lobby.
+    const isSpectator = room.status !== "lobby";
     const trimmed = name.trim().slice(0, 24) || "Player";
     const takenNames = new Set([...room.players.values()].map((p) => p.name.toLowerCase()));
     let finalName = trimmed;
@@ -218,7 +223,7 @@ class RoomManager {
     const resolvedColor = isValidAvatarColor(color) && !usedColors.includes(color) ? color : pickAvailableColor(usedColors);
     const playerId = nanoid(10);
     const token = nanoid(24);
-    const player: InternalPlayer = { id: playerId, name: finalName, connected: true, isHost: false, score: 0, color: resolvedColor, token };
+    const player: InternalPlayer = { id: playerId, name: finalName, connected: true, isHost: false, score: 0, color: resolvedColor, token, isSpectator };
     room.players.set(playerId, player);
     room.playerOrder.push(playerId);
     this.touch(room);
@@ -291,7 +296,7 @@ class RoomManager {
   private async startGameInternal(room: InternalRoom, gameId: string, options: GameOptions): Promise<void> {
     const game = getGame(gameId);
     if (!game) throw new RoomError("Unknown game.");
-    const players = room.playerOrder.map((id) => room.players.get(id)!).filter((p) => p.connected);
+    const players = room.playerOrder.map((id) => room.players.get(id)!).filter((p) => p.connected && !p.isSpectator);
     if (players.length < game.meta.minPlayers) throw new RoomError(`${game.meta.name} needs at least ${game.meta.minPlayers} players.`);
     if (players.length > game.meta.maxPlayers) throw new RoomError(`${game.meta.name} supports at most ${game.meta.maxPlayers} players.`);
     const resolved = resolveOptions(game.meta, options);
@@ -368,6 +373,14 @@ class RoomManager {
   private async applyGameActionLocked(code: string, playerId: PlayerId, action: unknown): Promise<void> {
     const room = this.getRoomOrThrow(code);
     if (room.status !== "in-game" || !room.gameId) throw new RoomError("No game is in progress.");
+    // A spectator isn't part of `state.playerIds` (they joined after the
+    // game's own player list was built), so most games' action handlers
+    // would just reject them anyway via their own turn/ownership checks —
+    // but a few actions (like the header's universal "Skip round", which
+    // is really just a generic timeUp with no playerId check in several
+    // games) aren't guarded that way, so block spectators explicitly here
+    // rather than relying on every game to happen to do it themselves.
+    if (room.players.get(playerId)?.isSpectator) throw new RoomError("You're spectating this game — you can't take actions in it.");
     const game = getGame(room.gameId);
     if (!game) throw new RoomError("Unknown game.");
     try {
@@ -394,6 +407,9 @@ class RoomManager {
     this.assertHost(room, requesterId);
     this.stopTicking(code);
     room.status = "lobby";
+    // Anyone who joined mid-game as a spectator becomes a normal player
+    // again now that there's no running game to have been excluded from.
+    for (const player of room.players.values()) player.isSpectator = false;
     room.gameId = null;
     room.gameOptions = {};
     room.gameState = null;

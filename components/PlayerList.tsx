@@ -38,6 +38,7 @@ export default function PlayerList({
           </span>
           <span className="ml-auto flex items-center gap-2">
             {p.isHost && <span className="text-xs text-gold">👑 host</span>}
+            {p.isSpectator && <span className="text-xs text-slate-500">👀 spectating</span>}
             {p.score > 0 && (
               <span className="text-xs text-slate-400">
                 🏆 {p.score} win{p.score === 1 ? "" : "s"}

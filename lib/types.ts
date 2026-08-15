@@ -12,6 +12,11 @@ export interface PlayerInfo {
   // initials/dots throughout the UI so players are recognizable at a glance
   // across the player list, team pickers, and per-game views.
   color: string;
+  // Someone who joined while a game was already in progress rather than
+  // from the lobby — they're visible in the room, can chat/react, but
+  // don't take a player slot and can't act in the game. Cleared back to a
+  // normal player automatically once the room returns to the lobby.
+  isSpectator: boolean;
 }
 
 export type RoomStatus = "lobby" | "in-game" | "finished";
