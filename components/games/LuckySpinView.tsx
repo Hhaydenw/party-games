@@ -21,10 +21,31 @@ function segLabel(seg: WheelSegment): string {
   return `$${seg}`;
 }
 
+// How long the wheel visually spins for, in ms — a fixed constant, not tied
+// to server round-trip time in any way. That decoupling matters: the
+// engine resolves a spin essentially instantly, so gating the animation on
+// "have we heard back from the server yet" made the wheel snap straight to
+// its final position the moment the response arrived, often well under a
+// frame after the click. A real casino wheel spins for a fixed, satisfying
+// stretch of time regardless of how fast the "outcome" was decided.
+const SPIN_DURATION_MS = 4200;
+const SPIN_FULL_TURNS = 6;
+
 // A real wedge-by-wedge wheel (not just a spinning circle) — the conic
 // gradient draws the wedges, a label is placed at each wedge's center
 // angle, and the whole thing rotates to land exactly on the server-chosen
 // wedge rather than just showing the resulting dollar amount.
+//
+// `spinning` only drives cosmetic touches (the glow ring, the ticking
+// sound) here — the CSS transition duration is a constant, always applied,
+// never conditional. Tying it to `spinning` was the original bug: that
+// flag flips back to `false` in the very same render the server's result
+// arrives, which is also the render that updates the target rotation, so
+// the browser saw the duration reset to 0ms in the same commit as the
+// rotation change and just snapped instantly instead of animating. Making
+// the duration unconditional also fixes a second issue for free — anyone
+// who *isn't* the player who clicked Spin never had a locally-true
+// `spinning` flag at all, so they never saw the wheel animate, ever.
 function Wheel({ spinning, lastSpinIndex }: { spinning: boolean; lastSpinIndex: number | null }) {
   const [rotation, setRotation] = useState(0);
   const prevIndex = useRef<number | null>(null);
@@ -36,8 +57,20 @@ function Wheel({ spinning, lastSpinIndex }: { spinning: boolean; lastSpinIndex: 
     const targetMod = (360 - wedgeCenter + 360) % 360;
     setRotation((prev) => {
       const nextFullTurn = Math.ceil(prev / 360) * 360;
-      return nextFullTurn + 4 * 360 + targetMod;
+      return nextFullTurn + SPIN_FULL_TURNS * 360 + targetMod;
     });
+
+    // A ticking sound that fires as each wedge boundary sweeps past the
+    // pointer, spaced out with an ease-out curve so it starts fast and
+    // audibly decelerates into the landing — mirrors the real prop's
+    // clicker without needing to track exact wedge-crossing timestamps.
+    const totalTicks = SPIN_FULL_TURNS * WHEEL.length + Math.round(targetMod / SEG_ANGLE);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 1; i <= totalTicks; i++) {
+      const t = SPIN_DURATION_MS * Math.pow(i / totalTicks, 1.8);
+      timers.push(setTimeout(() => playSound("click"), t));
+    }
+    return () => timers.forEach(clearTimeout);
   }, [lastSpinIndex]);
 
   const gradient = WHEEL.map((seg, i) => `${segColor(seg, i)} ${i * SEG_ANGLE}deg ${(i + 1) * SEG_ANGLE}deg`).join(", ");
@@ -49,8 +82,14 @@ function Wheel({ spinning, lastSpinIndex }: { spinning: boolean; lastSpinIndex: 
         style={{ borderLeft: "10px solid transparent", borderRight: "10px solid transparent", borderTop: "16px solid #f2b705" }}
       />
       <div
-        className="h-full w-full rounded-full border-4 border-white/20 shadow-2xl transition-transform ease-out"
-        style={{ background: `conic-gradient(${gradient})`, transform: `rotate(${rotation}deg)`, transitionDuration: spinning ? "2600ms" : "0ms" }}
+        className={`h-full w-full rounded-full border-4 shadow-2xl transition-transform ${spinning ? "border-gold/60" : "border-white/20"}`}
+        style={{
+          background: `conic-gradient(${gradient})`,
+          transform: `rotate(${rotation}deg)`,
+          transitionDuration: `${SPIN_DURATION_MS}ms`,
+          transitionTimingFunction: "cubic-bezier(0.17, 0.67, 0.14, 1)",
+          boxShadow: spinning ? "0 0 28px 4px rgba(242,183,5,0.45)" : undefined,
+        }}
       >
         {WHEEL.map((seg, i) => {
           const angle = i * SEG_ANGLE + SEG_ANGLE / 2;
@@ -86,14 +125,6 @@ export default function LuckySpinView({
   const isHost = meId === view.hostId;
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
-  const prevSpin = useRef(view.lastSpinResult);
-  useEffect(() => {
-    if (view.lastSpinResult !== prevSpin.current) {
-      setSpinning(false);
-      prevSpin.current = view.lastSpinResult;
-    }
-  }, [view.lastSpinResult]);
-
   const revealed = view.phase === "roundEnd" || view.phase === "finished";
   const wasRevealed = useRef(revealed);
   useEffect(() => {
@@ -101,10 +132,20 @@ export default function LuckySpinView({
     wasRevealed.current = revealed;
   }, [revealed, view.lastRoundResult, meId]);
 
+  // `spinning` runs for a fixed SPIN_DURATION_MS from the moment of the
+  // click — deliberately *not* tied to the server's response (which
+  // resolves near-instantly, well before the wheel is done animating).
+  // Gating the result reveal below on this instead of directly on
+  // `view.currentSegmentValue` keeps the guess/solve UI (and the answer
+  // itself) hidden until the wheel visually finishes spinning.
+  const spinTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(spinTimerRef.current), []);
   function spin() {
     setSpinning(true);
     playSound("click");
     onAction({ type: "spin" });
+    clearTimeout(spinTimerRef.current);
+    spinTimerRef.current = setTimeout(() => setSpinning(false), SPIN_DURATION_MS);
   }
 
   function guessLetter(letter: string, isVowel: boolean) {
@@ -176,7 +217,13 @@ export default function LuckySpinView({
 
       {view.phase === "playing" && view.yourTurn && (
         <div className="flex flex-col items-center gap-4">
-          {view.currentSegmentValue === null ? (
+          {/* Gated on `spinning`, not just `view.currentSegmentValue` — the
+              server resolves the spin almost instantly, well before the
+              wheel is done animating, so showing the result the moment
+              that response arrives would spoil it mid-spin. */}
+          {spinning ? (
+            <p className="animate-pulse text-sm font-semibold text-gold">🎡 Spinning…</p>
+          ) : view.currentSegmentValue === null ? (
             <button className="btn-gold text-lg" onClick={spin} disabled={spinning}>
               🎡 Spin
             </button>
@@ -188,7 +235,7 @@ export default function LuckySpinView({
             {CONSONANTS.map((l) => (
               <button
                 key={l}
-                disabled={view.currentSegmentValue === null || view.guessedLetters.includes(l)}
+                disabled={spinning || view.currentSegmentValue === null || view.guessedLetters.includes(l)}
                 onClick={() => guessLetter(l, false)}
                 className="flex h-9 w-9 items-center justify-center rounded-md bg-white/10 text-sm font-bold transition enabled:hover:bg-accent/40 disabled:opacity-30"
               >
@@ -200,7 +247,7 @@ export default function LuckySpinView({
             {VOWELS.map((l) => (
               <button
                 key={l}
-                disabled={!view.canBuyVowel || view.guessedLetters.includes(l)}
+                disabled={spinning || !view.canBuyVowel || view.guessedLetters.includes(l)}
                 onClick={() => guessLetter(l, true)}
                 className="flex h-9 w-9 items-center justify-center rounded-md bg-gold/20 text-sm font-bold text-gold transition enabled:hover:bg-gold/40 disabled:opacity-30"
               >
