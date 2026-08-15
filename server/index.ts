@@ -3,6 +3,7 @@ import next from "next";
 import { Server, Socket } from "socket.io";
 import { ClientToServerEvents, ServerToClientEvents } from "@/lib/types";
 import { roomManager, RoomError } from "@/lib/rooms";
+import { EMOTE_OPTIONS } from "@/lib/emojiReactions";
 
 const dev = process.env.NODE_ENV !== "production";
 const port = Number(process.env.PORT) || 3000;
@@ -209,8 +210,7 @@ app.prepare().then(() => {
       }
       const player = summary.players.find((p) => p.id === meta.playerId);
       if (!player) return;
-      const allowed = ["👍", "❤️", "😂", "🎉", "👏", "😮", "🔥", "👎"];
-      if (!allowed.includes(emoji)) return;
+      if (!(EMOTE_OPTIONS as readonly string[]).includes(emoji)) return;
       io.to(roomChannel(meta.code)).emit("room:emote", { playerId: meta.playerId, name: player.name, emoji, at: Date.now() });
     });
 

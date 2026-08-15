@@ -2,12 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParty } from "@/lib/socketClient";
-
-const EMOJI_OPTIONS = [
-  "👍", "❤️", "😂", "🎉", "👏", "😮", "🔥", "👎",
-  "😍", "🥳", "💀", "🤯", "👀", "💯", "🙌", "😢",
-  "🤔", "😱", "✨", "🍻", "😴", "🤡", "🫡", "🤝",
-];
+import { EMOTE_OPTIONS } from "@/lib/emojiReactions";
 
 interface FloatingEmote {
   id: string;
@@ -61,7 +56,7 @@ export default function EmoteBar() {
           <>
             <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
             <div className="absolute right-0 z-20 mt-2 grid w-56 grid-cols-6 gap-1 rounded-2xl border border-white/10 bg-ink p-2 shadow-2xl">
-              {EMOJI_OPTIONS.map((emoji) => (
+              {EMOTE_OPTIONS.map((emoji) => (
                 <button
                   key={emoji}
                   className="flex h-9 w-9 items-center justify-center rounded-lg text-lg transition hover:scale-125 hover:bg-white/10"
