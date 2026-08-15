@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { PlayerInfo } from "@/lib/types";
 import Avatar from "@/components/Avatar";
 
@@ -12,6 +15,13 @@ export default function PlayerList({
   // only allowed server-side, before a game/series has started.
   onKick?: (playerId: string) => void;
 }) {
+  // Kicking has no undo, so a single stray click shouldn't be able to do
+  // it — same two-click-to-confirm pattern used for Street Snap's "Skip
+  // round" button. First click on the ✕ arms it and swaps to a check icon;
+  // a second click within a few seconds actually kicks, and it
+  // auto-disarms if nothing follows.
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+
   return (
     <ul className="flex flex-col gap-2">
       {players.map((p) => (
@@ -35,11 +45,21 @@ export default function PlayerList({
             )}
             {onKick && !p.isHost && (
               <button
-                className="rounded-md px-1.5 py-0.5 text-xs text-slate-500 transition hover:bg-accent/20 hover:text-accent"
-                title={`Remove ${p.name} from the room`}
-                onClick={() => onKick(p.id)}
+                className={`rounded-md px-1.5 py-0.5 text-xs transition ${
+                  confirmingId === p.id ? "bg-accent/30 text-accent" : "text-slate-500 hover:bg-accent/20 hover:text-accent"
+                }`}
+                title={confirmingId === p.id ? `Click again to remove ${p.name}` : `Remove ${p.name} from the room`}
+                onClick={() => {
+                  if (confirmingId !== p.id) {
+                    setConfirmingId(p.id);
+                    setTimeout(() => setConfirmingId((cur) => (cur === p.id ? null : cur)), 3000);
+                    return;
+                  }
+                  setConfirmingId(null);
+                  onKick(p.id);
+                }}
               >
-                ✕
+                {confirmingId === p.id ? "✓ Confirm?" : "✕"}
               </button>
             )}
           </span>

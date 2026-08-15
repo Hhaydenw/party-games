@@ -71,10 +71,17 @@ export default function ColorMatchView({
     onAction({ type: "submitGuess", color: draft });
   }
 
-  // The track shows the actual gradient of colors this channel would
+  // A decorative gradient strip shows the actual colors this channel would
   // produce across its full range, with the *other* two channels held at
-  // their current values — so the slider itself answers "what will moving
-  // this do?" instead of making you guess and check the preview swatch.
+  // their current values — so it's clear at a glance what moving a given
+  // slider does instead of guessing and checking the preview swatch. It
+  // sits *behind* a fully untouched native range input (via
+  // pointer-events-none + absolute positioning) rather than trying to
+  // restyle the input's own track — an earlier version did that by
+  // stripping the input's native appearance and hand-rebuilding the
+  // thumb, which turned out to make the slider unreliable to actually
+  // drag across browsers. This way dragging is 100% native, unaffected by
+  // any of this.
   const CHANNEL_LABEL_COLOR: Record<"r" | "g" | "b", string> = { r: "text-red-400", g: "text-emerald-400", b: "text-blue-400" };
   function trackGradient(channel: "r" | "g" | "b"): string {
     const lo = { ...draft, [channel]: 0 };
@@ -85,16 +92,22 @@ export default function ColorMatchView({
     return (
       <label className="flex items-center gap-3">
         <span className={`w-4 text-xs font-black ${CHANNEL_LABEL_COLOR[channel]}`}>{label}</span>
-        <input
-          type="range"
-          min={0}
-          max={255}
-          value={draft[channel]}
-          disabled={view.youSubmitted}
-          onChange={(e) => setDraft((d) => ({ ...d, [channel]: Number(e.target.value) }))}
-          className="color-slider flex-1"
-          style={{ background: trackGradient(channel) }}
-        />
+        <div className="relative flex-1">
+          <div
+            className="pointer-events-none absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2 rounded-full"
+            style={{ background: trackGradient(channel) }}
+          />
+          <input
+            type="range"
+            min={0}
+            max={255}
+            value={draft[channel]}
+            disabled={view.youSubmitted}
+            onChange={(e) => setDraft((d) => ({ ...d, [channel]: Number(e.target.value) }))}
+            className="color-slider relative w-full bg-transparent"
+            style={{ accentColor: "#ffffff" }}
+          />
+        </div>
         <span className="w-9 text-right font-mono text-xs text-slate-400">{draft[channel]}</span>
       </label>
     );

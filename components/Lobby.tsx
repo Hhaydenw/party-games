@@ -20,6 +20,41 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
   const selected = games.find((g) => g.id === room.gameId);
   const connectedCount = room.players.filter((p) => p.connected).length;
 
+  // With 17+ games now, a flat grid is a lot to scan on a phone — a quick
+  // name search plus category chips narrows it down. Purely a client-side
+  // display filter; doesn't touch what's actually selected/queued.
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "card" | "board" | "party">("all");
+  const filteredGames = games.filter((g) => {
+    if (categoryFilter !== "all" && g.category !== categoryFilter) return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return g.name.toLowerCase().includes(q) || g.tagline.toLowerCase().includes(q);
+  });
+
+  const [copiedCode, setCopiedCode] = useState(false);
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(room.code);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 1500);
+    } catch {
+      // clipboard API unavailable — the code's already shown as plain text.
+    }
+  }
+
+  // Picks a random game for a host who can't decide — prefers games the
+  // current headcount can actually play right now, falling back to the
+  // full (filtered) list if nobody currently qualifies rather than doing
+  // nothing.
+  function surpriseMe() {
+    const eligible = filteredGames.filter((g) => connectedCount >= g.minPlayers && connectedCount <= g.maxPlayers);
+    const pool = eligible.length > 0 ? eligible : filteredGames;
+    if (pool.length === 0) return;
+    const pick = pool[Math.floor(Math.random() * pool.length)]!;
+    selectGame(pick.id);
+  }
+
   // Series Mode is a local toggle that changes what clicking a game card
   // does (single-select-and-start vs. add-to-a-queue); it snaps on
   // automatically once the room already has a queue set up, so joining
@@ -76,9 +111,14 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
       <header className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="font-display text-3xl font-extrabold">🎉 Party Games</h1>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-slate-400">
+          <button
+            className="flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1 text-sm text-slate-400 transition hover:bg-white/10"
+            onClick={copyCode}
+            title="Copy room code"
+          >
             Room <span className="font-semibold tracking-[0.2em] text-gold">{room.code}</span>
-          </span>
+            <span className="text-xs text-slate-500">{copiedCode ? "✓" : "⧉"}</span>
+          </button>
           <EmoteBar />
           <SoundSettingsButton />
         </div>
@@ -114,10 +154,41 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
             </p>
           )}
 
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <input
+              className="input max-w-[200px] py-1.5 text-sm"
+              placeholder="Search games…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-1.5">
+              {(["all", "party", "card", "board"] as const).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setCategoryFilter(c)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                    categoryFilter === c ? "bg-accent text-white" : "bg-white/5 text-slate-400 hover:bg-white/10"
+                  }`}
+                >
+                  {c === "all" ? "All" : CATEGORY_LABEL[c]}
+                </button>
+              ))}
+            </div>
+            {me.isHost && !seriesMode && (
+              <button className="btn-secondary ml-auto px-3 py-1.5 text-xs" onClick={surpriseMe} disabled={filteredGames.length === 0}>
+                🎲 Surprise me
+              </button>
+            )}
+          </div>
+
+          {filteredGames.length === 0 && <p className="mb-4 text-sm text-slate-500">No games match "{search}".</p>}
+
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {games.map((g) => {
+            {filteredGames.map((g) => {
               const queuedIndex = displayedQueue.indexOf(g.id);
               const isQueued = queuedIndex !== -1;
+              const tooFew = connectedCount < g.minPlayers;
+              const tooMany = connectedCount > g.maxPlayers;
               return (
                 <button
                   key={g.id}
@@ -143,8 +214,10 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
                   </div>
                   <div className="text-lg font-bold">{g.name}</div>
                   <p className="mt-1 text-sm text-slate-400">{g.tagline}</p>
-                  <p className="mt-2 text-xs text-slate-500">
+                  <p className={`mt-2 text-xs ${tooFew || tooMany ? "font-semibold text-accent" : "text-slate-500"}`}>
                     {g.minPlayers}–{g.maxPlayers} players
+                    {tooFew && ` — need ${g.minPlayers - connectedCount} more`}
+                    {tooMany && ` — too many, ${connectedCount - g.maxPlayers} over`}
                   </p>
                 </button>
               );
@@ -242,7 +315,9 @@ export default function Lobby({ room, me }: { room: RoomSummary; me: PlayerInfo 
         <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
           <InviteLink code={room.code} />
           <div className="card-surface rounded-3xl p-4">
-            <h3 className="mb-3 text-sm font-semibold text-slate-300">Players ({room.players.length})</h3>
+            <h3 className="mb-3 text-sm font-semibold text-slate-300">
+              Players ({connectedCount}/{room.players.length} connected)
+            </h3>
             <PlayerList players={room.players} meId={me.id} onKick={me.isHost ? kickPlayer : undefined} />
           </div>
           {room.players.some((p) => p.score > 0) && (

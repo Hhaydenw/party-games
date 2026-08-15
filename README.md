@@ -60,10 +60,19 @@ the roster while still thinking they're in the room. Only available in the
 lobby, not mid-game.
 
 **Emotes**: a 😊 button in the header (lobby and in-game) opens a quick
-reaction picker — 👍❤️😂🎉👏😮🔥👎 — that floats up and fades on everyone's
-screen the moment you send one, the same idea as Google Meet's in-call
-reactions. Nothing's saved or logged anywhere; it's purely a live, ephemeral
-broadcast to whoever's currently in the room.
+reaction picker — 24 emojis in a grid — that floats up and fades on
+everyone's screen the moment you send one, the same idea as Google Meet's
+in-call reactions. Nothing's saved or logged anywhere; it's purely a live,
+ephemeral broadcast to whoever's currently in the room.
+
+**Lobby quality-of-life**: a search box plus category chips narrow down the
+game grid once there are a lot of games to scan; each card shows right on
+its face if the current headcount can actually play it ("need 2 more" /
+"too many, 1 over") instead of only after picking it; a host who can't
+decide can hit **🎲 Surprise me** to get a random pick from whatever's
+currently eligible; the room code is a one-click copy button in the header;
+the players panel shows a live connected/total count; and kicking someone
+needs two clicks (click ✕, then confirm) since it has no undo.
 
 **Layout**: the lobby and in-game screens use the full width of the browser
 window (up to a generous cap on very wide monitors) instead of a narrow
