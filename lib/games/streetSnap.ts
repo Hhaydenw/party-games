@@ -28,7 +28,6 @@ import { CITIES, CityDef } from "@/lib/games/streetSnapCities";
 // a key, the game fails to start with a clear error rather than a crash.
 
 const EXPLORE_MS_DEFAULT = 180_000; // 3 minutes
-const VOTE_MS_DEFAULT = 45_000;
 const DEFAULT_ROUNDS = 3;
 const SEARCH_RADIUS_METERS = 500; // how far from the jittered point to look for a real panorama
 const MAX_CITY_ATTEMPTS = 8;
@@ -93,13 +92,16 @@ export interface StreetSnapState {
   playerIds: PlayerId[];
   totalRounds: number;
   exploreMs: number;
-  voteMs: number;
   roundIndex: number;
   city: { name: string; country: string };
   startPano: string;
   phase: StreetSnapPhase;
+  // Voting has no deadline/auto-timeout — unlike exploring, which is timed,
+  // voting ends only once everyone's voted or the host manually skips it
+  // (via the generic "timeUp" action). A round is "done" once the photos
+  // are taken; there's no reason to keep a clock running against the
+  // players while they're just picking a favorite.
   exploreEndsAt: number | null;
-  voteEndsAt: number | null;
   photos: Record<PlayerId, CameraState | null>;
   votes: Record<PlayerId, PlayerId>; // voterId -> votedForPlayerId
   scores: Record<PlayerId, number>;
@@ -123,7 +125,6 @@ export interface StreetSnapView {
   mapsApiKey: string;
   phase: StreetSnapPhase;
   exploreEndsAt: number | null;
-  voteEndsAt: number | null;
   yourPhotoSubmitted: boolean;
   submittedCount: number;
   totalPlayers: number;
@@ -157,7 +158,7 @@ function endVoting(state: StreetSnapState): StreetSnapState {
     ...state.log,
     winners.length > 0 ? `${winners.join(", ")} won the round's vote with ${max} vote${max === 1 ? "" : "s"}!` : "Nobody got a vote this round.",
   ].slice(-20);
-  return { ...state, phase: "roundEnd", voteEndsAt: null, scores, lastRoundGains, log };
+  return { ...state, phase: "roundEnd", scores, lastRoundGains, log };
 }
 
 async function startRound(state: StreetSnapState, roundIndex: number, apiKey: string): Promise<StreetSnapState> {
@@ -172,7 +173,6 @@ async function startRound(state: StreetSnapState, roundIndex: number, apiKey: st
     startPano: start.pano,
     phase: "exploring",
     exploreEndsAt: Date.now() + state.exploreMs,
-    voteEndsAt: null,
     photos,
     votes: {},
     lastRoundGains: {},
@@ -210,13 +210,11 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
       playerIds: players.map((p) => p.id),
       totalRounds,
       exploreMs,
-      voteMs: VOTE_MS_DEFAULT,
       roundIndex: 0,
       city: { name: "", country: "" },
       startPano: "",
       phase: "exploring",
       exploreEndsAt: null,
-      voteEndsAt: null,
       photos: {},
       votes: {},
       scores,
@@ -230,7 +228,7 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
 
     if (action.type === "timeUp") {
       if (state.phase === "exploring") {
-        return { ...state, phase: "voting", exploreEndsAt: null, voteEndsAt: Date.now() + state.voteMs };
+        return { ...state, phase: "voting", exploreEndsAt: null };
       }
       if (state.phase === "voting") {
         return endVoting(state);
@@ -244,7 +242,7 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
       const photos = { ...state.photos, [playerId]: action.camera };
       let next: StreetSnapState = { ...state, photos };
       const allIn = state.playerIds.every((pid) => photos[pid]);
-      if (allIn) next = { ...next, phase: "voting", exploreEndsAt: null, voteEndsAt: Date.now() + state.voteMs };
+      if (allIn) next = { ...next, phase: "voting", exploreEndsAt: null };
       return next;
     }
 
@@ -284,7 +282,6 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
       mapsApiKey: process.env.GOOGLE_MAPS_API_KEY ?? "",
       phase: state.phase,
       exploreEndsAt: state.exploreEndsAt,
-      voteEndsAt: state.voteEndsAt,
       yourPhotoSubmitted: Boolean(state.photos[playerId]),
       submittedCount: Object.values(state.photos).filter(Boolean).length,
       totalPlayers: state.playerIds.length,

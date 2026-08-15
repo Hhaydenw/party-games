@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { PlayerInfo, RoomSummary } from "@/lib/types";
 import { useParty } from "@/lib/socketClient";
 import GameView from "@/components/GameView";
@@ -14,6 +15,44 @@ import EmoteBar from "@/components/EmoteBar";
 // without a clock aren't in this list since a generic timeUp wouldn't mean
 // anything to them.
 const SKIPPABLE_GAMES = new Set(["trivia", "drawing", "family-feud", "name-that-tune", "wildest-answer", "price-check", "category-dash", "word-grid", "color-match", "street-snap"]);
+
+// Ends whatever timer is currently running right now — if that happens to
+// be a voting window, it ends voting immediately with whatever votes
+// (possibly zero) have been cast so far. That has no undo, so this needs a
+// confirm step — but browsers (Chrome especially) silently suppress
+// window.confirm()/alert() after a page has shown a few of them in a short
+// span, so a *native* confirm dialog can end up silently returning false
+// forever, making the whole button look broken with no visible cause. This
+// is a plain in-app two-click confirm instead: first click arms it and
+// relabels the button, a second click within a few seconds actually sends
+// the action, and it auto-disarms if nothing follows.
+function SkipRoundButton({ onConfirm }: { onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  return (
+    <button
+      className={`btn-secondary px-3 py-1.5 text-sm ${armed ? "!bg-accent/20 !text-accent" : ""}`}
+      title={armed ? "Click again to confirm" : "Skip the current round's timer early"}
+      onClick={() => {
+        if (!armed) {
+          setArmed(true);
+          timerRef.current = setTimeout(() => setArmed(false), 4000);
+          return;
+        }
+        if (timerRef.current) clearTimeout(timerRef.current);
+        setArmed(false);
+        onConfirm();
+      }}
+    >
+      {armed ? "Click again to skip" : "⏭ Skip round"}
+    </button>
+  );
+}
 
 export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerInfo }) {
   const { gameView, sendAction, error, clearError, returnToLobby } = useParty();
@@ -32,24 +71,7 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
           </span>
           <EmoteBar />
           <SoundSettingsButton />
-          {me.isHost && room.gameId && SKIPPABLE_GAMES.has(room.gameId) && (
-            <button
-              className="btn-secondary px-3 py-1.5 text-sm"
-              title="Skip the current round's timer early"
-              onClick={() => {
-                // This ends whatever timer is currently running *right now* —
-                // if that happens to be a voting window, it ends voting
-                // immediately with whatever votes (possibly zero) have been
-                // cast so far. A stray/early click here has no undo, so
-                // confirm rather than silently cutting voting short.
-                if (window.confirm("Skip the current timer and move on immediately? If voting is in progress, this ends it right now — anyone who hasn't voted yet won't get to.")) {
-                  sendAction({ type: "timeUp" });
-                }
-              }}
-            >
-              ⏭ Skip round
-            </button>
-          )}
+          {me.isHost && room.gameId && SKIPPABLE_GAMES.has(room.gameId) && <SkipRoundButton onConfirm={() => sendAction({ type: "timeUp" })} />}
           {me.isHost && (
             <button className="btn-secondary px-3 py-1.5 text-sm" onClick={returnToLobby}>
               End game

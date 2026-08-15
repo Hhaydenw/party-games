@@ -91,9 +91,12 @@ export default function StreetSnapView({
   const isHost = meId === view.hostId;
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
+  // Only the exploring phase is timed — voting has no deadline (it ends
+  // once everyone's voted, or the host manually skips it), so there's
+  // nothing here to count down once the round moves past taking photos.
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const firedTimeUp = useRef(false);
-  const deadline = view.phase === "exploring" ? view.exploreEndsAt : view.phase === "voting" ? view.voteEndsAt : null;
+  const deadline = view.phase === "exploring" ? view.exploreEndsAt : null;
   useEffect(() => {
     firedTimeUp.current = false;
     if (!deadline) {
@@ -383,75 +386,25 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.exploreEndsAt]);
 
-  if (view.yourPhotoSubmitted) {
-    return <p className="text-sm text-emerald-400">📸 Photo taken! Waiting on {view.totalPlayers - view.submittedCount} more…</p>;
-  }
-
-  if (pendingCamera) {
-    return (
-      <div className="flex w-full max-w-3xl flex-col items-center gap-3">
-        <p className="text-sm font-semibold text-gold">Review your photo</p>
-        <div
-          className="relative aspect-video w-full touch-none overflow-hidden rounded-2xl border border-white/10 bg-black"
-          style={{ cursor: cropScale > 1 ? "grab" : "default" }}
-          onPointerDown={startDrag}
-          onPointerMove={onDrag}
-          onPointerUp={endDrag}
-          onPointerLeave={endDrag}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={buildStaticStreetViewUrl(view.mapsApiKey, pendingCamera)}
-            alt="Your photo"
-            draggable={false}
-            className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
-            style={{
-              filter: filterCss(filterId),
-              transform: `translate(${50 - cropPos.x}%, ${50 - cropPos.y}%) scale(${cropScale})`,
-            }}
-          />
-        </div>
-        <label className="flex w-full max-w-xs items-center gap-2 text-xs text-slate-400">
-          🔍
-          <input
-            type="range"
-            min={100}
-            max={220}
-            value={cropScale * 100}
-            onChange={(e) => setCropScale(Number(e.target.value) / 100)}
-            className="flex-1 accent-accent"
-          />
-        </label>
-        {cropScale > 1 && <p className="text-xs text-slate-500">Drag the photo to reposition it</p>}
-        <div className="flex flex-wrap justify-center gap-1.5">
-          {FILTER_PRESETS.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setFilterId(f.id)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                filterId === f.id ? "bg-gold text-ink" : "bg-white/10 text-slate-300 hover:bg-white/20"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-3">
-          <button className="btn-secondary" onClick={retake}>
-            ↺ Retake
-          </button>
-          <button className="btn-gold" onClick={confirmSubmit}>
-            ✓ Submit photo
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // The panorama's DOM container must never be unmounted for the rest of
+  // the round — Google's StreetViewPanorama is attached to that specific
+  // element once, at construction, and nothing here ever re-attaches it to
+  // a new one. Review and "submitted" used to be entirely separate early
+  // `return`s with their own JSX, which meant the container div (rendered
+  // only in the "live" branch) got unmounted the moment either kicked in;
+  // retake() then just cleared local state and rendered a *fresh* empty
+  // container that no panorama was ever attached to — a black screen, since
+  // panoramaRef still pointed at the old, now-orphaned panorama object. Both
+  // states are now overlays drawn on top of the one persistent panorama box
+  // instead, so it's always there for retake to fall back to.
+  const showReview = Boolean(pendingCamera);
+  const showSubmitted = view.yourPhotoSubmitted && !showReview;
 
   return (
     <div className="flex w-full max-w-3xl flex-col items-center gap-3">
+      {showReview && <p className="text-sm font-semibold text-gold">Review your photo</p>}
       <div
-        className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black"
+        className="relative aspect-video w-full touch-none overflow-hidden rounded-2xl border border-white/10 bg-black"
         // Capture-phase (the "Capture" suffix) on all four — the Street
         // View widget's own canvas/drag handling can stop these events
         // from bubbling back out to a normal handler on this wrapper, but
@@ -473,15 +426,15 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         }}
       >
         <div ref={containerRef} className="absolute inset-0" />
-        {!ready && !loadError && (
+        {!ready && !loadError && !showReview && (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">Loading street imagery…</div>
         )}
-        {loadError && (
+        {loadError && !showReview && (
           <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-accent">
             Couldn't load the street view: {loadError}
           </div>
         )}
-        {aiming && (
+        {aiming && !showReview && (
           // z-[999]: the Street View widget injects its own internal DOM
           // layers into containerRef (zoom controls, pegman, compass...)
           // and those commonly carry an explicit inline z-index from
@@ -507,14 +460,82 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
             </div>
           </div>
         )}
+        {showReview && pendingCamera && (
+          <div
+            className="absolute inset-0 z-[999] bg-black"
+            style={{ cursor: cropScale > 1 ? "grab" : "default" }}
+            onPointerDown={startDrag}
+            onPointerMove={onDrag}
+            onPointerUp={endDrag}
+            onPointerLeave={endDrag}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={buildStaticStreetViewUrl(view.mapsApiKey, pendingCamera)}
+              alt="Your photo"
+              draggable={false}
+              className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
+              style={{
+                filter: filterCss(filterId),
+                transform: `translate(${50 - cropPos.x}%, ${50 - cropPos.y}%) scale(${cropScale})`,
+              }}
+            />
+          </div>
+        )}
+        {showSubmitted && (
+          <div className="absolute inset-0 z-[999] flex items-center justify-center bg-black/85 px-6 text-center">
+            <p className="text-sm text-emerald-400">📸 Photo taken! Waiting on {view.totalPlayers - view.submittedCount} more…</p>
+          </div>
+        )}
       </div>
-      <p className="text-xs text-slate-500">
-        Drag to look around, click the arrows on the ground to walk — or hold right-click to aim, left-click while
-        held to snap. © Google Street View.
-      </p>
-      <button className="btn-gold text-lg" onClick={startReview} disabled={!ready}>
-        📸 Take this photo
-      </button>
+
+      {showReview ? (
+        <>
+          <label className="flex w-full max-w-xs items-center gap-2 text-xs text-slate-400">
+            🔍
+            <input
+              type="range"
+              min={100}
+              max={220}
+              value={cropScale * 100}
+              onChange={(e) => setCropScale(Number(e.target.value) / 100)}
+              className="flex-1 accent-accent"
+            />
+          </label>
+          {cropScale > 1 && <p className="text-xs text-slate-500">Drag the photo to reposition it</p>}
+          <div className="flex flex-wrap justify-center gap-1.5">
+            {FILTER_PRESETS.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFilterId(f.id)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  filterId === f.id ? "bg-gold text-ink" : "bg-white/10 text-slate-300 hover:bg-white/20"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-3">
+            <button className="btn-secondary" onClick={retake}>
+              ↺ Retake
+            </button>
+            <button className="btn-gold" onClick={confirmSubmit}>
+              ✓ Submit photo
+            </button>
+          </div>
+        </>
+      ) : !showSubmitted ? (
+        <>
+          <p className="text-xs text-slate-500">
+            Drag to look around, click the arrows on the ground to walk — or hold right-click to aim, left-click
+            while held to snap. © Google Street View.
+          </p>
+          <button className="btn-gold text-lg" onClick={startReview} disabled={!ready}>
+            📸 Take this photo
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }
