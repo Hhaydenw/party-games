@@ -5,6 +5,7 @@ import { ColorMatchAction, ColorMatchView as ViewType, RGB } from "@/lib/games/c
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
 import { useCountdown } from "@/lib/useCountdown";
+import { serverNow } from "@/lib/serverClock";
 
 interface HSL {
   h: number; // 0-360
@@ -79,7 +80,14 @@ function HslSlider({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex items-center gap-3">
+    // A plain div, not a <label> — wrapping a range input in a <label>
+    // (its only purpose here was letting a tap anywhere in the row focus
+    // the input) can interact awkwardly with touch gesture handling on
+    // some mobile browsers, which lines up with this control's reported
+    // "sometimes works, sometimes doesn't" drag behavior. Removing it
+    // (combined with the touch-action fix below) leaves nothing standing
+    // between a touch and the input itself.
+    <div className="flex items-center gap-3">
       <span className="w-4 text-xs font-black text-slate-300">{label}</span>
       <div className="relative flex-1">
         <div className="pointer-events-none absolute inset-x-0 top-1/2 h-3.5 -translate-y-1/2 rounded-full ring-1 ring-inset ring-white/15" style={{ background: gradient }} />
@@ -95,7 +103,7 @@ function HslSlider({
         />
       </div>
       <span className="w-10 text-right font-mono text-xs text-slate-400">{displayValue}</span>
-    </label>
+    </div>
   );
 }
 
@@ -124,6 +132,33 @@ export default function ColorMatchView({
 
   const deadline = view.phase === "viewing" ? view.viewEndsAt : view.phase === "guessing" ? view.guessEndsAt : null;
   const remainingMs = useCountdown(deadline, isHost, () => onAction({ type: "timeUp" }));
+
+  // Auto-submit whatever's currently dialed in if the guessing clock runs
+  // out before you hit "Lock in guess" — previously there was no fallback
+  // at all here, so simply not clicking in time meant no guess got
+  // recorded whatsoever (scored 0) even if the sliders were sitting on a
+  // perfectly reasonable answer. This is a per-player concern (everyone
+  // auto-submits their *own* draft), independent of who's "primary" for
+  // firing the shared timeUp action above.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const autoSubmitted = useRef(false);
+  useEffect(() => {
+    autoSubmitted.current = false;
+  }, [view.roundIndex]);
+  useEffect(() => {
+    if (!view.guessEndsAt) return;
+    const msLeft = view.guessEndsAt - serverNow();
+    if (msLeft <= 0) return;
+    const t = setTimeout(() => {
+      if (view.youSubmitted || autoSubmitted.current) return;
+      autoSubmitted.current = true;
+      onAction({ type: "submitGuess", color: hslToRgb(draftRef.current) });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, msLeft + 50);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.guessEndsAt]);
 
   const announcedEnd = useRef(false);
   useEffect(() => {

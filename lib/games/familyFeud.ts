@@ -1206,9 +1206,23 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
     for (const p of players) (assignment[p.id] === "A" ? teamA : teamB).memberIds.push(p.id);
     const roundCount = Math.min(Number(options.rounds) || DEFAULT_ROUNDS, QUESTION_BANK.length);
     const allIndices = QUESTION_BANK.map((_, i) => i);
+    // Once *every* board's been played at least once across the server's
+    // lifetime, reset — same freshness-cycling pattern used elsewhere —
+    // rather than treating "no fresh boards left at all" as a permanent
+    // state.
+    if (usedPrompts.size >= QUESTION_BANK.length) usedPrompts.clear();
     const freshIndices = allIndices.filter((i) => !usedPrompts.has(QUESTION_BANK[i]!.prompt));
-    const pool = freshIndices.length >= roundCount ? freshIndices : allIndices; // reuse once the fresh pool runs out
-    const questionOrder = shuffle(pool).slice(0, roundCount);
+    // Previously: if there weren't *enough* fresh boards to fill every
+    // requested round, this fell back to the *entire* bank — including
+    // already-played boards — discarding however many genuinely-fresh
+    // ones there were instead of using them first. A room that's played,
+    // say, 3 of the 5 fresh boards left needed only 2 more, but got 8
+    // random boards from the full (mostly-already-played) bank instead.
+    // Now it always uses every fresh board before ever reaching for a
+    // repeat, and only pulls repeats to make up the remainder if truly
+    // necessary.
+    const alreadyPlayed = allIndices.filter((i) => !freshIndices.includes(i));
+    const questionOrder = [...shuffle(freshIndices), ...shuffle(alreadyPlayed)].slice(0, roundCount);
     for (const i of questionOrder) usedPrompts.add(QUESTION_BANK[i]!.prompt);
 
     const base: FeudState = {

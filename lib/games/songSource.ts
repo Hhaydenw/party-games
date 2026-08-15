@@ -126,7 +126,7 @@ async function searchOnce(term: string, genre: string): Promise<SongResult[]> {
 // Searches iTunes with progressively broader terms until there's a
 // reasonably sized, deduplicated pool of real songs (with working preview
 // clips) to build a game's rounds from.
-export async function searchSongs(genre: string, decade: string, minPoolSize = 15): Promise<SongResult[]> {
+export async function searchSongs(genre: string, decade: string, minPoolSize = 30): Promise<SongResult[]> {
   const terms = buildSearchTerms(genre, decade);
   const seen = new Set<string>();
   const pool: SongResult[] = [];

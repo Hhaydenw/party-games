@@ -180,7 +180,7 @@ function normalizeForDuplicate(text: string): string {
   return text.trim().toLowerCase().replace(/^(a|an|the)\s+/i, "").replace(/[^a-z0-9]/g, "");
 }
 
-export type CategoryDashPhase = "writing" | "reviewing" | "roundEnd" | "finished";
+export type CategoryDashPhase = "writing" | "reviewing" | "voting" | "roundEnd" | "finished";
 
 export type AnswerStatus = "empty" | "invalidLetter" | "unique" | "duplicate" | "challenged";
 
@@ -190,6 +190,11 @@ interface ScoredAnswer {
   status: AnswerStatus;
   points: number;
   challengedBy: PlayerId[];
+}
+
+interface FavoriteVote {
+  category: string;
+  targetPlayerId: PlayerId;
 }
 
 export interface CategoryDashState {
@@ -205,9 +210,14 @@ export interface CategoryDashState {
   answers: Record<PlayerId, Record<string, string>> | null; // frozen once writing ends
   // category -> targetPlayerId -> set of challengers, only meaningful during "reviewing"
   challenges: Record<string, PlayerId[]>;
+  // voterId -> which specific answer they picked as their favorite —
+  // only meaningful during "voting", which comes after reviewing/
+  // challenges so voting only ever considers answers that survived.
+  votes: Record<PlayerId, FavoriteVote>;
   writeEndsAt: number | null;
   scores: Record<PlayerId, number>;
   lastRoundGains: Record<PlayerId, number>;
+  lastRoundMvpIds: PlayerId[]; // whoever's answer won the favorite-answer vote this round
   log: string[];
 }
 
@@ -228,6 +238,9 @@ export interface CategoryDashView {
   totalPlayers: number;
   writeEndsAt: number | null;
   review: CategoryReviewView[] | null; // populated once writing ends
+  yourVote: FavoriteVote | null; // your favorite-answer pick this round, once voting starts
+  votedCount: number; // how many players have voted so far — voting phase only
+  lastRoundMvpIds: PlayerId[];
   scores: { playerId: PlayerId; score: number; roundGain: number }[];
 }
 
@@ -235,6 +248,7 @@ export type CategoryDashAction =
   | { type: "setAnswer"; category: string; text: string }
   | { type: "timeUp" }
   | { type: "challenge"; category: string; targetPlayerId: PlayerId }
+  | { type: "voteFavorite"; category: string; targetPlayerId: PlayerId }
   | { type: "advance" };
 
 function challengeKey(category: string, targetPlayerId: PlayerId): string {
@@ -296,10 +310,48 @@ function startRound(state: CategoryDashState, roundIndex: number, writeMs: numbe
     drafts: {},
     answers: null,
     challenges: {},
+    votes: {},
     writeEndsAt: Date.now() + writeMs,
     lastRoundGains: {},
+    lastRoundMvpIds: [],
     log: [...state.log, `Round ${roundIndex + 1} of ${state.totalRounds} begins!`].slice(-20),
   };
+}
+
+// Tallies the round's category points (the existing scoreRound pass) plus
+// a +1 bonus for whoever's answer got picked as everyone's favorite —
+// ties (more than one answer getting the single highest vote count) all
+// get the bonus rather than arbitrarily picking one.
+function finalizeVoting(state: CategoryDashState): CategoryDashState {
+  const { roundGains } = scoreRound(state);
+
+  const counts = new Map<string, { targetPlayerId: PlayerId; count: number }>();
+  for (const vote of Object.values(state.votes)) {
+    const key = challengeKey(vote.category, vote.targetPlayerId);
+    const entry = counts.get(key) ?? { targetPlayerId: vote.targetPlayerId, count: 0 };
+    entry.count += 1;
+    counts.set(key, entry);
+  }
+  const maxVotes = Math.max(0, ...[...counts.values()].map((c) => c.count));
+  const mvpBonus: Record<PlayerId, number> = {};
+  const lastRoundMvpIds: PlayerId[] = [];
+  if (maxVotes > 0) {
+    for (const { targetPlayerId, count } of counts.values()) {
+      if (count !== maxVotes) continue;
+      mvpBonus[targetPlayerId] = (mvpBonus[targetPlayerId] ?? 0) + 1;
+      lastRoundMvpIds.push(targetPlayerId);
+    }
+  }
+
+  const lastRoundGains: Record<PlayerId, number> = {};
+  const scores = { ...state.scores };
+  for (const pid of state.playerIds) {
+    const gain = (roundGains[pid] ?? 0) + (mvpBonus[pid] ?? 0);
+    lastRoundGains[pid] = gain;
+    scores[pid] = (scores[pid] ?? 0) + gain;
+  }
+
+  return { ...state, phase: "roundEnd", scores, lastRoundGains, lastRoundMvpIds };
 }
 
 export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, CategoryDashAction> = {
@@ -333,9 +385,11 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
       drafts: {},
       answers: null,
       challenges: {},
+      votes: {},
       writeEndsAt: null,
       scores,
       lastRoundGains: {},
+      lastRoundMvpIds: [],
       log: [],
     };
     return startRound(base, 0, writeMs);
@@ -350,8 +404,15 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
     }
 
     if (action.type === "timeUp") {
-      if (state.phase !== "writing") throw new GameActionError("Nothing to advance.");
-      return { ...state, phase: "reviewing", answers: state.drafts, writeEndsAt: null };
+      if (state.phase === "writing") {
+        return { ...state, phase: "reviewing", answers: state.drafts, writeEndsAt: null };
+      }
+      // The header's "Skip round" button (SKIPPABLE_GAMES) sends this same
+      // action regardless of phase, as a host escape hatch if the game's
+      // stuck waiting on someone — e.g. everyone's done challenging but
+      // nobody's advancing, or voting is stuck on one holdout.
+      if (state.phase === "voting") return finalizeVoting(state);
+      throw new GameActionError("Nothing to advance.");
     }
 
     if (action.type === "challenge") {
@@ -365,13 +426,36 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
       return { ...state, challenges: { ...state.challenges, [key]: nextVotes } };
     }
 
+    if (action.type === "voteFavorite") {
+      if (state.phase !== "voting") throw new GameActionError("Not voting on favorites right now.");
+      if (!state.categories.includes(action.category)) throw new GameActionError("Unknown category.");
+      if (action.targetPlayerId === playerId) throw new GameActionError("You can't vote for your own answer.");
+      if (!state.playerIds.includes(action.targetPlayerId)) throw new GameActionError("Unknown player.");
+      const { review } = scoreRound(state);
+      const cat = review.find((r) => r.category === action.category);
+      const answer = cat?.answers.find((a) => a.playerId === action.targetPlayerId);
+      if (!answer || (answer.status !== "unique" && answer.status !== "duplicate")) {
+        throw new GameActionError("That answer isn't eligible for a vote.");
+      }
+      // A plain overwrite, not a toggle — picking a different answer just
+      // replaces your previous pick, same as changing your mind before
+      // committing. Everyone having voted auto-resolves the round; the
+      // host can also force it early via "advance" (or the header's
+      // universal Skip round, which reuses timeUp) if someone's stalling.
+      const votes = { ...state.votes, [playerId]: { category: action.category, targetPlayerId: action.targetPlayerId } };
+      let next: CategoryDashState = { ...state, votes };
+      const allVoted = state.playerIds.every((pid) => Boolean(votes[pid]));
+      if (allVoted) next = finalizeVoting(next);
+      return next;
+    }
+
     if (action.type === "advance") {
       if (playerId !== state.hostId) throw new GameActionError("Only the host can advance the game.");
       if (state.phase === "reviewing") {
-        const { roundGains } = scoreRound(state);
-        const scores = { ...state.scores };
-        for (const [pid, gain] of Object.entries(roundGains)) scores[pid] = (scores[pid] ?? 0) + gain;
-        return { ...state, phase: "roundEnd", scores, lastRoundGains: roundGains };
+        return { ...state, phase: "voting" };
+      }
+      if (state.phase === "voting") {
+        return finalizeVoting(state);
       }
       if (state.phase === "roundEnd") {
         const nextRound = state.roundIndex + 1;
@@ -384,7 +468,8 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
     throw new GameActionError("Unknown action.");
   },
   getPlayerView(state, playerId) {
-    const { review } = state.phase === "reviewing" || state.phase === "roundEnd" || state.phase === "finished" ? scoreRound(state) : { review: null };
+    const revealed = state.phase === "reviewing" || state.phase === "voting" || state.phase === "roundEnd" || state.phase === "finished";
+    const { review } = revealed ? scoreRound(state) : { review: null };
     return {
       hostId: state.hostId,
       roundIndex: state.roundIndex,
@@ -397,6 +482,9 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
       totalPlayers: state.playerIds.length,
       writeEndsAt: state.writeEndsAt,
       review,
+      yourVote: state.votes[playerId] ?? null,
+      votedCount: Object.keys(state.votes).length,
+      lastRoundMvpIds: state.lastRoundMvpIds,
       scores: state.playerIds.map((pid) => ({ playerId: pid, score: state.scores[pid] ?? 0, roundGain: state.lastRoundGains[pid] ?? 0 })),
     };
   },

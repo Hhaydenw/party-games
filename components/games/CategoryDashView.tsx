@@ -138,10 +138,66 @@ export default function CategoryDashView({
         </div>
         {isHost ? (
           <button className="btn-primary" onClick={() => onAction({ type: "advance" })}>
-            Lock in scores
+            Continue to favorite vote →
           </button>
         ) : (
-          <p className="text-sm text-slate-400">Waiting for the host to lock in scores…</p>
+          <p className="text-sm text-slate-400">Waiting for the host to continue…</p>
+        )}
+      </div>
+    );
+  }
+
+  if (view.phase === "voting" && view.review) {
+    return (
+      <div className="flex flex-col items-center gap-6">
+        <p className="text-lg font-bold">Round {view.roundIndex + 1} · Vote for your favorite answer</p>
+        <p className="max-w-md text-center text-xs text-slate-500">
+          Pick the single answer (from anyone but yourself) that impressed you most this round — whoever gets the
+          most votes earns their team (or themselves) a bonus point.
+        </p>
+        <p className="text-sm text-slate-400">
+          {view.votedCount}/{view.totalPlayers} players have voted
+        </p>
+        <div className="grid w-full max-w-3xl gap-4 sm:grid-cols-2">
+          {view.review.map((cat) => (
+            <div key={cat.category} className="rounded-2xl bg-white/5 p-4">
+              <p className="mb-2 text-sm font-semibold text-gold">{cat.category}</p>
+              <div className="flex flex-col gap-1.5">
+                {cat.answers
+                  .filter((a) => a.status === "unique" || a.status === "duplicate")
+                  .map((a) => {
+                    const isMyVote = view.yourVote?.category === cat.category && view.yourVote?.targetPlayerId === a.playerId;
+                    return (
+                      <div key={a.playerId} className="flex items-center justify-between gap-2 rounded-lg bg-black/20 px-3 py-1.5 text-sm">
+                        <span className="min-w-0 truncate">
+                          <span className="font-semibold text-slate-300">{nameFor(a.playerId)}: </span>
+                          {a.text}
+                        </span>
+                        {a.playerId !== meId && (
+                          <button
+                            className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold transition ${
+                              isMyVote ? "bg-gold/20 text-gold" : "text-slate-500 hover:bg-gold/20 hover:text-gold"
+                            }`}
+                            title="Vote this your favorite answer"
+                            onClick={() => {
+                              playSound("select");
+                              onAction({ type: "voteFavorite", category: cat.category, targetPlayerId: a.playerId });
+                            }}
+                          >
+                            {isMyVote ? "★ Your pick" : "☆ Vote"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          ))}
+        </div>
+        {isHost && (
+          <button className="btn-secondary text-xs" onClick={() => onAction({ type: "advance" })}>
+            Skip ahead (tally votes now)
+          </button>
         )}
       </div>
     );
@@ -151,6 +207,11 @@ export default function CategoryDashView({
     return (
       <div className="flex flex-col items-center gap-6">
         <p className="text-lg font-bold">{view.phase === "finished" ? "🏆 Final results!" : `Round ${view.roundIndex + 1} results`}</p>
+        {view.phase === "roundEnd" && view.lastRoundMvpIds.length > 0 && (
+          <p className="text-center text-sm font-semibold text-gold">
+            ⭐ {view.lastRoundMvpIds.map(nameFor).join(" & ")} had the crowd's favorite answer — +1 bonus point!
+          </p>
+        )}
         <div className="flex flex-wrap justify-center gap-3 text-sm">
           {[...view.scores]
             .sort((a, b) => b.score - a.score)

@@ -228,7 +228,19 @@ export const streetSnap: GameDefinition<StreetSnapState, StreetSnapView, StreetS
 
     if (action.type === "timeUp") {
       if (state.phase === "exploring") {
-        return { ...state, phase: "voting", exploreEndsAt: null };
+        // The client-side auto-submit (a setTimeout keyed to exploreEndsAt)
+        // is the primary way a non-responding player still gets a photo in
+        // at the buzzer, but it's not bulletproof — a backgrounded mobile
+        // tab can have its timers throttled enough to miss the window
+        // entirely. Rather than let anyone who didn't manage to submit
+        // simply vanish from the voting round with no photo, fall back to
+        // a plain shot of wherever the round started for anyone still
+        // missing one once time's actually up.
+        const photos = { ...state.photos };
+        for (const pid of state.playerIds) {
+          if (!photos[pid]) photos[pid] = { pano: state.startPano, heading: 0, pitch: 0, zoom: 1 };
+        }
+        return { ...state, photos, phase: "voting", exploreEndsAt: null };
       }
       if (state.phase === "voting") {
         return endVoting(state);

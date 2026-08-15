@@ -51,6 +51,13 @@ body {
 .color-slider {
   width: 100%;
   cursor: pointer;
+  /* Without this, touch devices can hand the initial gesture to page-scroll
+     arbitration instead of the slider — inconsistently, since it's a race
+     between the browser's own gesture recognizer and the input's drag
+     handling, which is exactly the "sometimes works, sometimes doesn't"
+     pattern reported for this control. Telling the browser up front that
+     this element handles its own gestures removes that race entirely. */
+  touch-action: none;
 }
 .color-slider:disabled {
   cursor: not-allowed;

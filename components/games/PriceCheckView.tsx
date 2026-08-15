@@ -92,6 +92,7 @@ export default function PriceCheckView({
           {view.brand} · {view.category}
         </p>
         <h2 className="text-center text-lg font-bold leading-tight">{view.title}</h2>
+        {view.description && <p className="max-w-sm text-center text-xs text-slate-500">{view.description}</p>}
         {revealed ? (
           <p className="text-3xl font-black text-gold [animation:feud-pop_0.4s_ease-out]">{money(view.revealedPrice!)}</p>
         ) : (

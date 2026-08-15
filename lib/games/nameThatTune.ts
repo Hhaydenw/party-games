@@ -24,7 +24,22 @@ const playedTitles = new Set<string>();
 
 function pickNext(pool: SongResult[], order: number[], used: number[]): { index: number; song: SongResult } | null {
   const remaining = order.filter((i) => !used.includes(i));
-  const fresh = remaining.filter((i) => !playedTitles.has(pool[i]!.title));
+  let fresh = remaining.filter((i) => !playedTitles.has(pool[i]!.title));
+  // Unlike every other game's freshness pool (Category Dash, Price Check,
+  // Family Feud), this one never cleared `playedTitles` once a search
+  // pool's fully exhausted — it just silently fell back to serving from
+  // `remaining` with no freshness preference at all, forever, for however
+  // long the server keeps running. For a narrow genre/decade combo (a
+  // small search result pool), replaying the game a few times exhausts it
+  // fast, and once that happens *every* pick — including round 1 of a
+  // fresh "Play again" — comes from the same small fully-played pool with
+  // nothing steering it away from whatever was just played. Clearing and
+  // retrying (same pattern used everywhere else) at least gets freshness
+  // preference back rather than abandoning it permanently.
+  if (fresh.length === 0 && playedTitles.size > 0) {
+    playedTitles.clear();
+    fresh = remaining;
+  }
   const candidates = fresh.length > 0 ? fresh : remaining;
   if (candidates.length === 0) return null;
   const index = candidates[0]!;

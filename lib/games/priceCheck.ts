@@ -50,20 +50,37 @@ export interface ProductInfo {
   category: string;
   price: number;
   thumbnail: string | null;
+  // A short real product description, shown alongside the title/brand so
+  // there's more to go on than just a often-generic product name (e.g.
+  // "Blue T-Shirt") when guessing.
+  description: string | null;
 }
 
 async function fetchProducts(category: string): Promise<ProductInfo[]> {
+  // limit=0 asks dummyjson for its *entire* catalog rather than a capped
+  // page — its whole product list is only ~194 items total (confirmed
+  // directly against the live API), so there's no real pool bigger than
+  // "everything they have" to fetch; this at least guarantees nothing in
+  // it gets missed by an arbitrary limit.
   const url =
     category === "all"
-      ? "https://dummyjson.com/products?limit=194&select=id,title,brand,category,price,thumbnail"
-      : `https://dummyjson.com/products/category/${encodeURIComponent(category)}?limit=100&select=id,title,brand,category,price,thumbnail`;
+      ? "https://dummyjson.com/products?limit=0&select=id,title,brand,category,price,thumbnail,description"
+      : `https://dummyjson.com/products/category/${encodeURIComponent(category)}?limit=0&select=id,title,brand,category,price,thumbnail,description`;
   try {
     const res = await fetch(url);
     if (!res.ok) return [];
     const data = (await res.json()) as { products?: DummyProduct[] };
     return (data.products ?? [])
       .filter((p) => p.title && typeof p.price === "number" && p.price > 0)
-      .map((p) => ({ id: p.id, title: p.title, brand: p.brand ?? p.category, category: p.category, price: Math.round(p.price * 100) / 100, thumbnail: p.thumbnail ?? null }));
+      .map((p) => ({
+        id: p.id,
+        title: p.title,
+        brand: p.brand ?? p.category,
+        category: p.category,
+        price: Math.round(p.price * 100) / 100,
+        thumbnail: p.thumbnail ?? null,
+        description: p.description ?? null,
+      }));
   } catch {
     return [];
   }
@@ -80,7 +97,18 @@ function shuffle<T>(arr: T[]): T[] {
 
 function pickNext(pool: ProductInfo[], order: number[], used: number[]): { index: number; product: ProductInfo } | null {
   const remaining = order.filter((i) => !used.includes(i));
-  const fresh = remaining.filter((i) => !usedProductIds.has(pool[i]!.id));
+  let fresh = remaining.filter((i) => !usedProductIds.has(pool[i]!.id));
+  // dummyjson's whole catalog is ~194 products (the full, un-filtered
+  // pool), and a lot fewer per individual category — easy to exhaust
+  // across a few games in the same room. This used to just silently fall
+  // back to `remaining` with no freshness preference at all once
+  // exhausted, forever, rather than resetting and getting freshness back
+  // (the same bug Name That Tune's song picker had) — that's likely a real
+  // contributor to the repeats being noticeable.
+  if (fresh.length === 0 && usedProductIds.size > 0) {
+    usedProductIds.clear();
+    fresh = remaining;
+  }
   const candidates = fresh.length > 0 ? fresh : remaining;
   if (candidates.length === 0) return null;
   const index = candidates[0]!;
@@ -119,6 +147,7 @@ export interface PriceCheckView {
   brand: string;
   category: string;
   thumbnail: string | null;
+  description: string | null;
   phase: PriceCheckPhase;
   yourGuess: number | null;
   guessedCount: number;
@@ -227,6 +256,7 @@ export const priceCheck: GameDefinition<PriceCheckState, PriceCheckView, PriceCh
       brand: state.product.brand,
       category: state.product.category,
       thumbnail: state.product.thumbnail,
+      description: state.product.description,
       phase: state.phase,
       yourGuess: state.guesses[playerId]?.amount ?? null,
       guessedCount: Object.keys(state.guesses).length,
