@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { CategoryDashAction, CategoryDashView as ViewType } from "@/lib/games/categoryDash";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { useCountdown } from "@/lib/useCountdown";
 
 const STATUS_LABEL: Record<string, string> = {
   unique: "✓ unique",
@@ -33,8 +34,6 @@ export default function CategoryDashView({
 }) {
   const isHost = meId === view.hostId;
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
-  const firedTimeUp = useRef(false);
 
   // The input's displayed value used to be bound straight to the server-
   // echoed `view.yourDrafts`, sending an action on every keystroke — typing
@@ -47,24 +46,7 @@ export default function CategoryDashView({
     setLocalDrafts({});
   }, [view.roundIndex]);
 
-  useEffect(() => {
-    firedTimeUp.current = false;
-    if (!view.writeEndsAt) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, view.writeEndsAt! - Date.now());
-      setRemainingMs(remaining);
-      if (remaining === 0 && isHost && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" });
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 300);
-    return () => clearInterval(interval);
-  }, [view.writeEndsAt, isHost, onAction]);
+  const remainingMs = useCountdown(view.writeEndsAt, isHost, () => onAction({ type: "timeUp" }));
 
   const announcedEnd = useRef(false);
   useEffect(() => {

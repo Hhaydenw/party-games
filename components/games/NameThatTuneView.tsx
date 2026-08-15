@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { NameThatTuneAction, NameThatTuneView as ViewType } from "@/lib/games/nameThatTune";
 import { PlayerInfo } from "@/lib/types";
 import { playSound, getSoundSettings, subscribeSoundSettings } from "@/lib/sound";
+import { useCountdown } from "@/lib/useCountdown";
 
 export default function NameThatTuneView({
   view,
@@ -18,9 +19,12 @@ export default function NameThatTuneView({
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [guessDraft, setGuessDraft] = useState("");
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const firedTimeUp = useRef(false);
+  // Guards handleEnded() specifically, separate from useCountdown's own
+  // internal guard for the fallback path below — the two are independent
+  // and both are safe to fire (the server safely no-ops a redundant
+  // timeUp once the round's already moved past "guessing").
+  const endedFired = useRef(false);
   const isHost = meId === view.hostId;
 
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
@@ -70,37 +74,18 @@ export default function NameThatTuneView({
   // of a fixed guess that could cut a longer clip off early.
   function handleEnded() {
     setIsPlaying(false);
-    if (isHost && view.phase === "guessing" && !firedTimeUp.current) {
-      firedTimeUp.current = true;
+    if (isHost && view.phase === "guessing" && !endedFired.current) {
+      endedFired.current = true;
       onAction({ type: "timeUp" });
     }
   }
+  useEffect(() => {
+    endedFired.current = false;
+  }, [view.roundEndsAt]);
 
   // Fallback only — in case playback never starts/finishes (autoplay
-  // blocked, network hiccup). A short grace period after the round starts
-  // avoids a spurious instant fire from any clock skew between server and
-  // client right as a fresh round begins.
-  const roundStartedAt = useRef(Date.now());
-  useEffect(() => {
-    firedTimeUp.current = false;
-    roundStartedAt.current = Date.now();
-    if (!view.roundEndsAt) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, view.roundEndsAt! - Date.now());
-      setRemainingMs(remaining);
-      const pastGracePeriod = Date.now() - roundStartedAt.current > 2000;
-      if (remaining === 0 && pastGracePeriod && isHost && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" });
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 300);
-    return () => clearInterval(interval);
-  }, [view.roundEndsAt, isHost, onAction]);
+  // blocked, network hiccup).
+  const remainingMs = useCountdown(view.roundEndsAt, isHost, () => onAction({ type: "timeUp" }));
 
   function submitGuess(e: React.FormEvent) {
     e.preventDefault();

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ColorMatchAction, ColorMatchView as ViewType, RGB } from "@/lib/games/colorMatch";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { useCountdown } from "@/lib/useCountdown";
 
 interface HSL {
   h: number; // 0-360
@@ -114,8 +115,6 @@ export default function ColorMatchView({
   const isHost = meId === view.hostId;
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
   const [draft, setDraft] = useState<HSL>(NEUTRAL);
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
-  const firedTimeUp = useRef(false);
 
   // Reset the slider draft to neutral grey at the start of each round,
   // rather than carrying over the previous round's guess.
@@ -124,24 +123,7 @@ export default function ColorMatchView({
   }, [view.roundIndex]);
 
   const deadline = view.phase === "viewing" ? view.viewEndsAt : view.phase === "guessing" ? view.guessEndsAt : null;
-  useEffect(() => {
-    firedTimeUp.current = false;
-    if (!deadline) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, deadline - Date.now());
-      setRemainingMs(remaining);
-      if (remaining === 0 && isHost && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" });
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 200);
-    return () => clearInterval(interval);
-  }, [deadline, isHost, onAction]);
+  const remainingMs = useCountdown(deadline, isHost, () => onAction({ type: "timeUp" }));
 
   const announcedEnd = useRef(false);
   useEffect(() => {

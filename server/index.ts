@@ -59,6 +59,12 @@ app.prepare().then(() => {
   roomManager.onTick((code) => broadcastRoomState(io, code));
 
   io.on("connection", (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
+    // See lib/serverClock.ts — a bare ack with this server's current
+    // timestamp, used by clients to estimate their clock offset so every
+    // player's countdowns agree with each other instead of each drifting
+    // by however far off their own device's clock happens to be.
+    socket.on("time:sync", (cb) => cb(Date.now()));
+
     socket.on("room:create", ({ name, color }, cb) => {
       try {
         const { code, playerId, token } = roomManager.createRoom(name, color);

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { CameraState, StreetSnapAction, StreetSnapView as ViewType } from "@/lib/games/streetSnap";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { serverNow } from "@/lib/serverClock";
+import { useCountdown } from "@/lib/useCountdown";
 
 // Guards so the Maps JS API's options are only set once per page (the
 // loader errors if you try to change them after a library's already been
@@ -94,27 +96,8 @@ export default function StreetSnapView({
   // Only the exploring phase is timed — voting has no deadline (it ends
   // once everyone's voted, or the host manually skips it), so there's
   // nothing here to count down once the round moves past taking photos.
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
-  const firedTimeUp = useRef(false);
   const deadline = view.phase === "exploring" ? view.exploreEndsAt : null;
-  useEffect(() => {
-    firedTimeUp.current = false;
-    if (!deadline) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, deadline - Date.now());
-      setRemainingMs(remaining);
-      if (remaining === 0 && isHost && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" }); // safety net in case someone's client didn't auto-submit (e.g. disconnected)
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 500);
-    return () => clearInterval(interval);
-  }, [deadline, isHost, onAction]);
+  const remainingMs = useCountdown(deadline, isHost, () => onAction({ type: "timeUp" })); // safety net in case someone's client didn't auto-submit (e.g. disconnected)
 
   return (
     <div className="flex flex-col items-center gap-5">
@@ -372,7 +355,7 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   }, [view.startPano]);
   useEffect(() => {
     if (!view.exploreEndsAt) return;
-    const msLeft = view.exploreEndsAt - Date.now();
+    const msLeft = view.exploreEndsAt - serverNow();
     if (msLeft <= 0) return;
     const t = setTimeout(() => {
       if (submittedRef.current || autoSubmitted.current) return;

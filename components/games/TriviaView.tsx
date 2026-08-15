@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { TriviaAction, TriviaView as ViewType } from "@/lib/games/trivia";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { useCountdown } from "@/lib/useCountdown";
 
 const LETTERS = ["A", "B", "C", "D"];
 
@@ -20,27 +21,7 @@ export default function TriviaView({
 }) {
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
   const isHost = meId === view.hostId;
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
-  const firedTimeUp = useRef(false);
-
-  useEffect(() => {
-    firedTimeUp.current = false;
-    if (!view.roundEndsAt) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, view.roundEndsAt! - Date.now());
-      setRemainingMs(remaining);
-      if (remaining === 0 && isHost && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" });
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 300);
-    return () => clearInterval(interval);
-  }, [view.roundEndsAt, isHost, onAction]);
+  const remainingMs = useCountdown(view.roundEndsAt, isHost, () => onAction({ type: "timeUp" }));
 
   const revealedPrev = useRef(view.correctIndex !== null);
   useEffect(() => {

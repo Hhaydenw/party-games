@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { PriceCheckAction, PriceCheckView as ViewType } from "@/lib/games/priceCheck";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { useCountdown } from "@/lib/useCountdown";
 
 function money(n: number) {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -45,31 +46,12 @@ export default function PriceCheckView({
   // wiping out whatever had just been typed, on every affected keystroke.
   // A sanitized text field sidesteps the whole class of bug.
   const [draft, setDraft] = useState("");
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
-  const firedTimeUp = useRef(false);
   const isHost = meId === view.hostId;
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
   useEffect(() => setDraft(""), [view.roundIndex]);
 
-  useEffect(() => {
-    firedTimeUp.current = false;
-    if (!view.roundEndsAt) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, view.roundEndsAt! - Date.now());
-      setRemainingMs(remaining);
-      if (remaining === 0 && isHost && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" });
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 300);
-    return () => clearInterval(interval);
-  }, [view.roundEndsAt, isHost, onAction]);
+  const remainingMs = useCountdown(view.roundEndsAt, isHost, () => onAction({ type: "timeUp" }));
 
   const revealed = view.phase === "roundEnd" || view.phase === "finished";
   const wasRevealed = useRef(revealed);

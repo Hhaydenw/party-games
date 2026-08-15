@@ -6,6 +6,7 @@ import { BOARD_SIZE, PremiumType, getPremium } from "@/lib/games/wordGridBoard";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
 import { useParty } from "@/lib/socketClient";
+import { useCountdown } from "@/lib/useCountdown";
 
 const PREMIUM_LABEL: Record<Exclude<PremiumType, null>, string> = { DL: "DL", TL: "TL", DW: "DW", TW: "TW", ST: "★" };
 const PREMIUM_CLASS: Record<Exclude<PremiumType, null>, string> = {
@@ -106,29 +107,13 @@ export default function WordGridView({
   }, [staged, view.isYourTurn, sendTilePreview]);
 
   // Turn timer — any client can report it running out (matching the other
-  // timer-based games), but only the current turn's own client actually
-  // fires it automatically; the host also has a manual "Skip round" override
-  // in the room header for when that player's disconnected.
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
-  const firedTimeUp = useRef(false);
-  useEffect(() => {
-    firedTimeUp.current = false;
-    if (!view.turnEndsAt) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, view.turnEndsAt! - Date.now());
-      setRemainingMs(remaining);
-      if (remaining === 0 && view.isYourTurn && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" });
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 500);
-    return () => clearInterval(interval);
-  }, [view.turnEndsAt, view.isYourTurn, onAction]);
+  // timer-based games, plus the usual fallback if the current player's own
+  // tab is what's stalled — see useCountdown), but the current turn's own
+  // client is the "primary" one that fires it right away; the host also
+  // has a manual "Skip round" override in the room header for when that
+  // player's disconnected. Running out is a lost turn, not a pass — see
+  // the engine's timeUp handling.
+  const remainingMs = useCountdown(view.turnEndsAt, view.isYourTurn, () => onAction({ type: "timeUp" }));
 
   const stagedByCell = new Map(staged.map((s) => [`${s.row},${s.col}`, s]));
   const usedTileIds = new Set(staged.map((s) => s.tileId));
@@ -207,25 +192,42 @@ export default function WordGridView({
     stageTile(row, col, tile.id, tile.letter, false, tile.value);
   }
 
+  // The free dictionaryapi.dev lookup used to error out fairly often before
+  // eventually working on a repeat click — a transient 429 (rate limited)
+  // or 5xx from that service, or a plain network hiccup, was being treated
+  // identically to a genuine "word not in the dictionary" 404, with no
+  // retry at all. Now only a real 404 is reported as "no definition
+  // found"; anything that looks transient gets a couple of automatic
+  // retries with a short backoff before giving up, so a flaky response
+  // resolves itself without the player needing to notice and click again.
   async function lookUpWord(word: string) {
     setDefinition({ word, loading: true, text: null });
-    try {
-      const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word.toLowerCase())}`);
-      if (!res.ok) {
-        setDefinition({ word, loading: false, text: "No definition found (it's still a valid play — this free dictionary just doesn't cover every word list entry)." });
+    const attempts = 3;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word.toLowerCase())}`);
+        if (res.status === 404) {
+          setDefinition({ word, loading: false, text: "No definition found (it's still a valid play — this free dictionary just doesn't cover every word list entry)." });
+          return;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`); // transient (rate limit, 5xx) — retry below
+        const data = await res.json();
+        const entry = data[0];
+        const meaning = entry?.meanings?.[0];
+        const def = meaning?.definitions?.[0]?.definition;
+        setDefinition({
+          word,
+          loading: false,
+          text: def ? `${meaning.partOfSpeech ? `(${meaning.partOfSpeech}) ` : ""}${def}` : "No definition found.",
+        });
         return;
+      } catch {
+        if (attempt === attempts) {
+          setDefinition({ word, loading: false, text: "Couldn't reach the dictionary right now — try again in a moment." });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 350 * attempt));
       }
-      const data = await res.json();
-      const entry = data[0];
-      const meaning = entry?.meanings?.[0];
-      const def = meaning?.definitions?.[0]?.definition;
-      setDefinition({
-        word,
-        loading: false,
-        text: def ? `${meaning.partOfSpeech ? `(${meaning.partOfSpeech}) ` : ""}${def}` : "No definition found.",
-      });
-    } catch {
-      setDefinition({ word, loading: false, text: "Couldn't reach the dictionary right now." });
     }
   }
 
@@ -256,11 +258,6 @@ export default function WordGridView({
         <span className={view.isYourTurn ? "font-bold text-gold" : "text-slate-400"}>
           {view.isYourTurn ? "Your turn!" : `${nameFor(view.turnPlayerId)}'s turn`}
         </span>
-        {remainingMs !== null && (
-          <span className={`font-bold tabular-nums ${remainingMs < 20_000 ? "text-accent" : "text-slate-400"}`}>
-            ⏱ {Math.floor(remainingMs / 1000 / 60)}:{String(Math.ceil((remainingMs / 1000) % 60)).padStart(2, "0")}
-          </span>
-        )}
         <span className="text-slate-500">🎒 {view.bagCount} tiles left in bag</span>
       </div>
 
@@ -354,7 +351,14 @@ export default function WordGridView({
       )}
 
       <div className="flex flex-col items-center gap-2">
-        <p className="text-xs uppercase tracking-widest text-slate-500">Your rack — drag tiles onto the board, or tap one then tap a square</p>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <p className="text-xs uppercase tracking-widest text-slate-500">Your rack — drag tiles onto the board, or tap one then tap a square</p>
+          {remainingMs !== null && (
+            <span className={`font-bold tabular-nums ${remainingMs < 20_000 ? "text-accent" : "text-slate-400"}`}>
+              ⏱ {Math.floor(remainingMs / 1000 / 60)}:{String(Math.ceil((remainingMs / 1000) % 60)).padStart(2, "0")}
+            </span>
+          )}
+        </div>
         <div className="flex flex-wrap justify-center gap-1.5 rounded-xl border-2 border-[#5c3d21] bg-[#7a5230] p-2">
           {view.yourRack.map((tile) => {
             const isUsed = usedTileIds.has(tile.id);

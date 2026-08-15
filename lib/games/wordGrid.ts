@@ -376,16 +376,23 @@ export const wordGrid: GameDefinition<WordGridState, WordGridView, WordGridActio
 
     // Unlike the other actions, timeUp isn't restricted to whoever's turn
     // it is — any connected client can report the deadline passing (the
-    // same pattern the timer-based party games use), and it auto-passes
+    // same pattern the timer-based party games use), and it skips the turn
     // for whoever's actually up rather than requiring their own client to
     // be the one to notice.
+    //
+    // This is a *lost turn*, deliberately not the same thing as a
+    // voluntary pass — it doesn't touch `passStreak`. A pass is a genuine
+    // "I have nothing to play" signal from every player in a row, which is
+    // the real Scrabble end condition; a timeout is usually just someone
+    // being slow, distracted, or momentarily away, not the whole table
+    // agreeing the game's stuck. Counting it the same way meant two
+    // players simply running out of time back-to-back (passStreak reaching
+    // playerIds.length in a 2-player game) could end the game entirely out
+    // from under them.
     if (action.type === "timeUp") {
       const current = state.playerIds[state.turnIndex]!;
-      const passStreak = state.passStreak + 1;
-      const log = [...state.log, `${current} ran out of time and was passed.`].slice(-30);
-      let next: WordGridState = { ...state, passStreak, log, turnIndex: nextTurn(state), turnEndsAt: Date.now() + TURN_MS };
-      if (passStreak >= state.playerIds.length) next = endGame(next, null);
-      return next;
+      const log = [...state.log, `${current} ran out of time — turn skipped.`].slice(-30);
+      return { ...state, log, turnIndex: nextTurn(state), turnEndsAt: Date.now() + TURN_MS };
     }
 
     if (state.playerIds[state.turnIndex] !== playerId) throw new GameActionError("Not your turn.");

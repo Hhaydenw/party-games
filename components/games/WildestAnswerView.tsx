@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { WildestAnswerAction, WildestAnswerView as ViewType } from "@/lib/games/wildestAnswer";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { useCountdown } from "@/lib/useCountdown";
 
 export default function WildestAnswerView({
   view,
@@ -17,30 +18,11 @@ export default function WildestAnswerView({
   players: PlayerInfo[];
 }) {
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
-  const firedTimeUp = useRef(false);
   const isHost = meId === view.hostId;
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
   const deadline = view.phase === "writing" ? view.writeEndsAt : view.phase === "voting" ? view.voteEndsAt : null;
-  useEffect(() => {
-    firedTimeUp.current = false;
-    if (!deadline) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, deadline - Date.now());
-      setRemainingMs(remaining);
-      if (remaining === 0 && isHost && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" });
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 300);
-    return () => clearInterval(interval);
-  }, [deadline, isHost, onAction]);
+  const remainingMs = useCountdown(deadline, isHost, () => onAction({ type: "timeUp" }));
 
   useEffect(() => setDraft({}), [view.roundIndex]);
 

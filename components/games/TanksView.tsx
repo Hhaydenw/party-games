@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { TanksAction, TanksView as ViewType } from "@/lib/games/tanks";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { serverNow } from "@/lib/serverClock";
 
 const TEAM_COLOR: Record<string, string> = { red: "#ef4444", blue: "#3b82f6" };
 const SOLO_COLORS = ["#e94560", "#f2b705", "#22c55e", "#3b82f6", "#a855f7", "#f97316", "#14b8a6", "#ec4899"];
@@ -170,7 +171,7 @@ export default function TanksView({
   }, [view, meId]);
 
   const me = view.players.find((p) => p.id === meId);
-  const remainingSec = Math.max(0, Math.ceil((view.matchEndsAt - Date.now()) / 1000));
+  const remainingSec = Math.max(0, Math.ceil((view.matchEndsAt - serverNow()) / 1000));
 
   // React to my own tank's aliveness/kills changing between ticks — one hit
   // is always fatal now, so "hit" and "died" are the same event.

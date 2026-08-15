@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { FeudAction, FeudView as ViewType } from "@/lib/games/familyFeud";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { useCountdown } from "@/lib/useCountdown";
 
 const TEAM_STYLE: Record<string, { bg: string; ring: string; text: string; solid: string }> = {
   A: { bg: "bg-red-500/15", ring: "ring-red-400/50", text: "text-red-400", solid: "bg-red-600" },
@@ -109,26 +110,7 @@ export default function FamilyFeudView({
   // Face-off answers get a fast 7s clock; controlling/stealing guesses get
   // 25s — both driven by the same server-set `guessDeadline`, with the host
   // firing timeUp once it lapses (same pattern as Trivia/Name That Tune).
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
-  const firedTimeUp = useRef(false);
-  useEffect(() => {
-    firedTimeUp.current = false;
-    if (!view.guessDeadline) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, view.guessDeadline! - Date.now());
-      setRemainingMs(remaining);
-      if (remaining === 0 && isHost && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" });
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 300);
-    return () => clearInterval(interval);
-  }, [view.guessDeadline, isHost, onAction]);
+  const remainingMs = useCountdown(view.guessDeadline, isHost, () => onAction({ type: "timeUp" }));
 
   return (
     <div className="grid w-full gap-5 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { DrawingAction, DrawingView as ViewType, Stroke } from "@/lib/games/drawing";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { useCountdown } from "@/lib/useCountdown";
 
 const PALETTE = ["#f5f5f5", "#1a1a2e", "#e94560", "#f2b705", "#22c55e", "#3b82f6", "#a855f7", "#78350f"];
 const WIDTHS = [3, 6, 12];
@@ -48,8 +49,6 @@ export default function DrawingView({
   const drawingStrokeId = useRef<string | null>(null);
   const lastEmitAt = useRef(0);
   const [guessDraft, setGuessDraft] = useState("");
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
-  const firedTimeUp = useRef(false);
 
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
@@ -81,25 +80,9 @@ export default function DrawingView({
     wasRoundEnd.current = isEnd;
   }, [view.phase]);
 
-  // Local countdown ticker; the drawer's client is the one that fires timeUp.
-  useEffect(() => {
-    firedTimeUp.current = false;
-    if (!view.roundEndsAt) {
-      setRemainingMs(null);
-      return;
-    }
-    const tick = () => {
-      const remaining = Math.max(0, view.roundEndsAt! - Date.now());
-      setRemainingMs(remaining);
-      if (remaining === 0 && view.isDrawer && !firedTimeUp.current) {
-        firedTimeUp.current = true;
-        onAction({ type: "timeUp" });
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 300);
-    return () => clearInterval(interval);
-  }, [view.roundEndsAt, view.isDrawer, onAction]);
+  // Local countdown ticker; the drawer's client is the primary one to fire
+  // timeUp (with the usual fallback if their tab stalls — see useCountdown).
+  const remainingMs = useCountdown(view.roundEndsAt, view.isDrawer, () => onAction({ type: "timeUp" }));
 
   function pointFromEvent(e: React.PointerEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();

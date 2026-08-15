@@ -144,4 +144,8 @@ export interface ClientToServerEvents {
   "chat:send": (payload: { text: string }) => void;
   "room:emote": (payload: { emoji: string }) => void;
   "game:tilePreview": (payload: { cells: { row: number; col: number }[] }) => void;
+  // Plain round-trip ping used to estimate clock offset against the
+  // server's clock — see lib/serverClock.ts. No payload; the server just
+  // acks with its own current timestamp.
+  "time:sync": (cb: (serverNow: number) => void) => void;
 }

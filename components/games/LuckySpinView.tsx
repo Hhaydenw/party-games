@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LuckySpinAction, LuckySpinView as ViewType, WHEEL, WheelSegment } from "@/lib/games/luckySpin";
+import { LuckySpinAction, LuckySpinView as ViewType, WHEEL, WheelSegment, SPIN_DURATION_MS } from "@/lib/games/luckySpin";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
+import { serverNow } from "@/lib/serverClock";
 
 const CONSONANTS = "BCDFGHJKLMNPQRSTVWXYZ".split("");
 const VOWELS = "AEIOU".split("");
 const SEG_ANGLE = 360 / WHEEL.length;
+const SPIN_FULL_TURNS = 4;
 
 function segColor(seg: WheelSegment, i: number): string {
   if (seg === "BANKRUPT") return "#0f1117";
@@ -21,72 +23,27 @@ function segLabel(seg: WheelSegment): string {
   return `$${seg}`;
 }
 
-// How long the wheel visually spins for, in ms — a fixed constant, not tied
-// to server round-trip time in any way. That decoupling matters: the
-// engine resolves a spin essentially instantly, so gating the animation on
-// "have we heard back from the server yet" made the wheel snap straight to
-// its final position the moment the response arrived, often well under a
-// frame after the click. A real casino wheel spins for a fixed, satisfying
-// stretch of time regardless of how fast the "outcome" was decided.
-const SPIN_DURATION_MS = 4200;
-const SPIN_FULL_TURNS = 6;
-
 // A real wedge-by-wedge wheel (not just a spinning circle) — the conic
 // gradient draws the wedges, a label is placed at each wedge's center
 // angle, and the whole thing rotates to land exactly on the server-chosen
-// wedge rather than just showing the resulting dollar amount.
+// wedge rather than just displaying the resulting dollar amount.
 //
-// `spinning` only drives cosmetic touches (the glow ring, the ticking
-// sound) here — the CSS transition duration is a constant, always applied,
-// never conditional. Tying it to `spinning` was the original bug: that
-// flag flips back to `false` in the very same render the server's result
-// arrives, which is also the render that updates the target rotation, so
-// the browser saw the duration reset to 0ms in the same commit as the
-// rotation change and just snapped instantly instead of animating. Making
-// the duration unconditional also fixes a second issue for free — anyone
-// who *isn't* the player who clicked Spin never had a locally-true
-// `spinning` flag at all, so they never saw the wheel animate, ever.
-function Wheel({ spinning, lastSpinIndex }: { spinning: boolean; lastSpinIndex: number | null }) {
-  const [rotation, setRotation] = useState(0);
-  const prevIndex = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (lastSpinIndex === null || lastSpinIndex === prevIndex.current) return;
-    prevIndex.current = lastSpinIndex;
-    const wedgeCenter = lastSpinIndex * SEG_ANGLE + SEG_ANGLE / 2;
-    const targetMod = (360 - wedgeCenter + 360) % 360;
-    setRotation((prev) => {
-      const nextFullTurn = Math.ceil(prev / 360) * 360;
-      return nextFullTurn + SPIN_FULL_TURNS * 360 + targetMod;
-    });
-
-    // A ticking sound that fires as each wedge boundary sweeps past the
-    // pointer, spaced out with an ease-out curve so it starts fast and
-    // audibly decelerates into the landing — mirrors the real prop's
-    // clicker without needing to track exact wedge-crossing timestamps.
-    const totalTicks = SPIN_FULL_TURNS * WHEEL.length + Math.round(targetMod / SEG_ANGLE);
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    for (let i = 1; i <= totalTicks; i++) {
-      const t = SPIN_DURATION_MS * Math.pow(i / totalTicks, 1.8);
-      timers.push(setTimeout(() => playSound("click"), t));
-    }
-    return () => timers.forEach(clearTimeout);
-  }, [lastSpinIndex]);
-
+// Labels run *vertically* (stacked top-to-bottom via `writing-mode`)
+// instead of tangentially around the rim. That sidesteps the whole
+// upside-down/mirrored-text problem an earlier version had to work around
+// with a 180°-flip hack for the lower half of the wheel — every label
+// simply reads top-to-bottom along its own spoke, at every wedge, with no
+// special-casing needed for which half of the wheel it's on.
+function Wheel({ rotation, spinning }: { rotation: number; spinning: boolean }) {
   const gradient = WHEEL.map((seg, i) => `${segColor(seg, i)} ${i * SEG_ANGLE}deg ${(i + 1) * SEG_ANGLE}deg`).join(", ");
 
   return (
-    // Bumped up from 224px to 288px — 16 wedges at 22.5° each left almost
-    // no room for a label plus the pointer/hub, especially "BANKRUPT".
-    // Kept to 288px rather than going bigger still since this needs to fit
-    // inside a phone screen without causing horizontal scroll (the game
-    // content column has its own padding on top of the viewport's, leaving
-    // well under 320px of clear width on a lot of phones). The label
-    // radius below is scaled to match.
-    <div className="relative h-[288px] w-[288px] shrink-0">
+    // No mobile constraint to design around here, so this is sized to be
+    // as legible as possible rather than capped to fit a phone screen.
+    <div className="relative h-[440px] w-[440px] shrink-0">
       <div
         className="absolute left-1/2 top-0 z-10 h-0 w-0 -translate-x-1/2 -translate-y-1"
-        style={{ borderLeft: "12px solid transparent", borderRight: "12px solid transparent", borderTop: "20px solid #f2b705" }}
+        style={{ borderLeft: "16px solid transparent", borderRight: "16px solid transparent", borderTop: "28px solid #f2b705" }}
       />
       <div
         className={`h-full w-full rounded-full border-4 shadow-2xl transition-transform ${spinning ? "border-gold/60" : "border-white/20"}`}
@@ -95,28 +52,20 @@ function Wheel({ spinning, lastSpinIndex }: { spinning: boolean; lastSpinIndex: 
           transform: `rotate(${rotation}deg)`,
           transitionDuration: `${SPIN_DURATION_MS}ms`,
           transitionTimingFunction: "cubic-bezier(0.17, 0.67, 0.14, 1)",
-          boxShadow: spinning ? "0 0 28px 4px rgba(242,183,5,0.45)" : undefined,
+          boxShadow: spinning ? "0 0 32px 5px rgba(242,183,5,0.45)" : undefined,
         }}
       >
         {WHEEL.map((seg, i) => {
           const angle = i * SEG_ANGLE + SEG_ANGLE / 2;
-          // Without this, labels on the lower half of the wheel (roughly
-          // 90°–270°, i.e. past 3 o'clock going down to 9 o'clock) render
-          // upside-down and mirrored — the label div is rotated to point
-          // radially outward, and past the halfway point that orientation
-          // reads backward. Flipping those specific labels another 180°
-          // keeps every label within ±90° of horizontal, so nothing is
-          // ever upside-down, at the cost of those labels pointing
-          // "inward" instead of "outward" (still perfectly legible).
-          const flip = angle > 90 && angle < 270;
           return (
             <div
               key={i}
               className="absolute left-1/2 top-1/2 h-0 w-0 origin-top-left"
-              style={{ transform: `rotate(${angle}deg) translate(0, -118px)` }}
+              style={{ transform: `rotate(${angle}deg) translate(0, -180px)` }}
             >
               <span
-                className={`block whitespace-nowrap text-xs font-black text-white drop-shadow ${flip ? "-translate-x-1/2 rotate-180" : "-translate-x-1/2"}`}
+                className="block -translate-x-1/2 text-sm font-black text-white drop-shadow"
+                style={{ writingMode: "vertical-rl", textOrientation: "upright", letterSpacing: "-1px" }}
               >
                 {segLabel(seg)}
               </span>
@@ -124,7 +73,7 @@ function Wheel({ spinning, lastSpinIndex }: { spinning: boolean; lastSpinIndex: 
           );
         })}
       </div>
-      <div className="absolute inset-0 m-auto flex h-16 w-16 items-center justify-center rounded-full border-4 border-ink bg-gold text-xl">🎡</div>
+      <div className="absolute inset-0 m-auto flex h-20 w-20 items-center justify-center rounded-full border-4 border-ink bg-gold text-2xl">🎡</div>
     </div>
   );
 }
@@ -141,7 +90,6 @@ export default function LuckySpinView({
   players: PlayerInfo[];
 }) {
   const [solveDraft, setSolveDraft] = useState("");
-  const [spinning, setSpinning] = useState(false);
   const isHost = meId === view.hostId;
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
@@ -152,20 +100,60 @@ export default function LuckySpinView({
     wasRevealed.current = revealed;
   }, [revealed, view.lastRoundResult, meId]);
 
-  // `spinning` runs for a fixed SPIN_DURATION_MS from the moment of the
-  // click — deliberately *not* tied to the server's response (which
-  // resolves near-instantly, well before the wheel is done animating).
-  // Gating the result reveal below on this instead of directly on
-  // `view.currentSegmentValue` keeps the guess/solve UI (and the answer
-  // itself) hidden until the wheel visually finishes spinning.
-  const spinTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(spinTimerRef.current), []);
+  // `spinning` is derived from the server-broadcast `spinEndsAt` deadline
+  // (via the clock-synced serverNow(), same as every other timer) instead
+  // of local-only state set by whoever clicked Spin. That was the actual
+  // bug behind the wheel "not spinning for other players" — the previous
+  // version's `spinning` flag only ever became true on the clicking
+  // player's own client (a local setTimeout keyed to their click), so
+  // spectators' UI never agreed with what the wheel itself was doing, and
+  // the reveal-gating logic below (which used that same local flag) could
+  // end up stuck in an inconsistent state for them. Deriving it from a
+  // real, shared deadline means every client's idea of "is a spin
+  // currently animating" is identical.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (!view.spinEndsAt) return;
+    const interval = setInterval(() => forceTick((t) => t + 1), 100);
+    return () => clearInterval(interval);
+  }, [view.spinEndsAt]);
+  const spinning = view.spinEndsAt !== null && serverNow() < view.spinEndsAt;
+
+  // The wheel's rotation target — recomputed whenever the server hands us
+  // a new `lastSpinIndex`, continuing smoothly from wherever it currently
+  // sits rather than resetting, so a spin landing while a previous spin's
+  // animation hasn't fully settled yet (possible right after Bankrupt/Lose
+  // a Turn immediately passes the turn to someone who spins again) still
+  // reads as one continuous motion instead of jumping.
+  const [rotation, setRotation] = useState(0);
+  const prevIndex = useRef<number | null>(null);
+  useEffect(() => {
+    if (view.lastSpinIndex === null || view.lastSpinIndex === prevIndex.current) return;
+    prevIndex.current = view.lastSpinIndex;
+    const wedgeCenter = view.lastSpinIndex * SEG_ANGLE + SEG_ANGLE / 2;
+    const targetMod = (360 - wedgeCenter + 360) % 360;
+    setRotation((prev) => {
+      const nextFullTurn = Math.ceil(prev / 360) * 360;
+      return nextFullTurn + SPIN_FULL_TURNS * 360 + targetMod;
+    });
+
+    // A ticking sound that fires as wedges sweep past the pointer, spaced
+    // with an ease-out curve so it starts fast and audibly decelerates
+    // into the landing — a fixed tick count rather than one scaled to the
+    // exact number of wedge-crossings, which keeps this cheap regardless
+    // of how many full turns the spin makes.
+    const TICKS = 18;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 1; i <= TICKS; i++) {
+      const t = SPIN_DURATION_MS * Math.pow(i / TICKS, 1.8);
+      timers.push(setTimeout(() => playSound("click"), t));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [view.lastSpinIndex]);
+
   function spin() {
-    setSpinning(true);
     playSound("click");
     onAction({ type: "spin" });
-    clearTimeout(spinTimerRef.current);
-    spinTimerRef.current = setTimeout(() => setSpinning(false), SPIN_DURATION_MS);
   }
 
   function guessLetter(letter: string, isVowel: boolean) {
@@ -222,8 +210,8 @@ export default function LuckySpinView({
       </div>
 
       {/* Wheel + status */}
-      <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-6">
-        <Wheel spinning={spinning} lastSpinIndex={view.lastSpinIndex} />
+      <div className="flex flex-col items-center gap-3">
+        <Wheel rotation={rotation} spinning={spinning} />
         <p className="text-sm text-slate-400">
           {view.phase === "finished" ? (
             "🏆 Game over!"
@@ -237,10 +225,11 @@ export default function LuckySpinView({
 
       {view.phase === "playing" && view.yourTurn && (
         <div className="flex flex-col items-center gap-4">
-          {/* Gated on `spinning`, not just `view.currentSegmentValue` — the
-              server resolves the spin almost instantly, well before the
-              wheel is done animating, so showing the result the moment
-              that response arrives would spoil it mid-spin. */}
+          {/* Gated on `spinning` (the shared, server-synced deadline), not
+              just `view.currentSegmentValue` — the server resolves the
+              spin almost instantly, well before the wheel is done
+              animating, so showing the result the moment that response
+              arrives would spoil it mid-spin. */}
           {spinning ? (
             <p className="animate-pulse text-sm font-semibold text-gold">🎡 Spinning…</p>
           ) : view.currentSegmentValue === null ? (

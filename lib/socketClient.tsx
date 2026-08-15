@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { ClientToServerEvents, GameOptions, PlayerId, RoomSummary, ServerToClientEvents } from "@/lib/types";
+import { syncClockOffset } from "@/lib/serverClock";
 
 export interface StoredSession {
   code: string;
@@ -105,7 +106,24 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     socketRef.current = socket;
     let emoteSeq = 0;
 
-    socket.on("connect", () => setConnected(true));
+    // Clock offset estimate (see lib/serverClock.ts) — re-synced on every
+    // (re)connect, since a dropped/restored connection is exactly when a
+    // laptop coming back from sleep or a phone switching networks tends to
+    // also have let its clock drift further, and periodically thereafter
+    // in case of slow drift during a long session.
+    function ping(): Promise<number> {
+      return new Promise((resolve, reject) => {
+        if (!socket.connected) return reject(new Error("not connected"));
+        socket.emit("time:sync", resolve);
+      });
+    }
+    socket.on("connect", () => {
+      setConnected(true);
+      syncClockOffset(ping);
+    });
+    const resyncInterval = setInterval(() => {
+      if (socket.connected) syncClockOffset(ping);
+    }, 90_000);
     socket.on("disconnect", () => setConnected(false));
     socket.on("room:state", (summary) => {
       setRoom(summary);
@@ -135,6 +153,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      clearInterval(resyncInterval);
       socket.disconnect();
     };
   }, []);

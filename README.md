@@ -113,6 +113,21 @@ to end a dragging round early instead of waiting out the full timer. Turn-based
 games without a clock, and real-time games like Tank Arena, don't show it since
 there's no timer for it to mean anything against.
 
+**Countdown accuracy**: every round timer in the app is a server-issued
+deadline (an absolute timestamp), and every client estimates its clock offset
+against the server on connect (a small ping/pong round-trip, re-synced
+periodically) rather than trusting its own device clock — phones and laptops
+commonly drift by anywhere from seconds to minutes, which used to make
+countdowns look wrong for whoever's clock was off. On top of that, whoever's
+responsible for reporting "time's up" (usually the host, or the current
+player for turn-based games) fires it the instant their clock says zero, but
+every *other* connected client will also fire it after a short grace delay if
+nothing's happened yet — a fallback for the case where that primary player's
+own browser tab is backgrounded (very easy at a party) and its timer gets
+throttled by the OS. The server safely ignores a redundant "time's up" once
+a round's already moved on, so there's no harm in more than one client
+reporting it.
+
 Nothing is on the "coming soon" shelf right now — see
 [Adding a new game](#adding-a-new-game) if you want to keep going.
 
@@ -266,22 +281,26 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   it's your turn, or solve the puzzle outright; whoever solves banks that
   round's earnings. A real wedge-by-wedge wheel (16 wedges vs. the real
   show's ~24, same flavor — mostly cash, occasional Bankrupt/Lose a Turn
-  traps) spins and rotates to land exactly on the wedge the server actually
-  picked, rather than just a plain spinning circle showing the resulting
-  amount. The puzzle board is a navy game-show board (styled like Family
-  Feud's) with letter tiles that wrap onto new rows at word boundaries
-  instead of needing to scroll a single long line sideways.
+  traps), sized generously since this is a desktop/tablet-friendly game, with
+  each wedge's label running vertically along its own spoke rather than
+  curved text around the rim. It spins and rotates to land exactly on the
+  wedge the server actually picked, with the animation itself driven by a
+  server-issued deadline — so it plays identically (and reliably) on every
+  connected client, not just whoever clicked Spin. The puzzle board is a
+  navy game-show board (styled like Family Feud's) with letter tiles that
+  wrap onto new rows at word boundaries instead of needing to scroll a
+  single long line sideways.
 - **Category Dash** is an original Scattergories-style word race (original
-  category list, same "written fresh" approach as the other party games).
-  Each round gets a random letter and 10 categories; everyone races to write
-  one word/phrase per category starting with that letter before the timer
-  runs out. There's no dictionary check — validity is entirely peer-judged,
-  same as playing at a table: unique answers score 2, answers two or more
-  players both wrote score 1 each, anything not starting with the round's
-  letter auto-scores 0, and anyone can **challenge** an answer they think
-  doesn't actually fit — if more than half the *other* players agree, it
-  scores 0. Skips the letters Q/U/X/Y/Z since they make most categories
-  nearly unplayable.
+  category list — 100+ categories — same "written fresh" approach as the
+  other party games). Each round gets a random letter and 10 categories;
+  everyone races to write one word/phrase per category starting with that
+  letter before the timer runs out. There's no dictionary check — validity
+  is entirely peer-judged, same as playing at a table: unique answers score
+  2, answers two or more players both wrote score 1 each, anything not
+  starting with the round's letter auto-scores 0, and anyone can
+  **challenge** an answer they think doesn't actually fit — if more than
+  half the *other* players agree, it scores 0. Skips the letters Q/U/X/Y/Z
+  since they make most categories nearly unplayable.
 - **Word Grid** is a Scrabble-style crossword tile game — an original board
   layout and tile point values, not a copy of any specific commercial game's
   exact grid (see `lib/games/wordGridBoard.ts`). Take turns laying tiles
@@ -292,20 +311,26 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   play must cover the center square. Each tile is tinted with the color of
   whoever played it (the same avatar color shown everywhere else), the
   board has a wood-grain frame and wooden rack tiles instead of a flat
-  navy grid, and placing a tile plays a short "clack" sound. **Click any
-  already-played letter** to see the word(s) it's part of and look up a
-  real definition (via the free, keyless
-  [dictionaryapi.dev](https://api.dictionaryapi.dev)). While it's your
-  turn, opponents see a live, letter-free hint of *where* you're about to
-  place tiles (an outline on the empty squares, never what's actually on
-  them) via a small ephemeral relay — never stored, purely a "something's
-  happening" courtesy so the board doesn't look frozen mid-turn. Each turn
-  has a **2-minute clock**; running out auto-passes that turn (any
-  connected client can report the deadline passing, not just the current
-  player's own, so a dropped connection can't stall the game — the host
-  also has a manual **⏭ Skip round** override in the header). Word validity
-  is checked against a bundled public-domain word list (the ENABLE word
-  list — see `lib/games/data/wordlist.LICENSE.txt`) rather than a live API,
+  navy grid, and placing a tile plays a short "clack" sound. The turn timer
+  sits right next to your rack rather than up above the board, closer to
+  where your attention actually is while playing. **Click any already-played
+  letter** to see the word(s) it's part of and look up a real definition
+  (via the free, keyless [dictionaryapi.dev](https://api.dictionaryapi.dev)
+  — a couple of automatic retries with backoff smooth over that free
+  service's occasional transient errors, so a flaky response resolves
+  itself without needing a second click). While it's your turn, opponents
+  see a live, letter-free hint of *where* you're about to place tiles (an
+  outline on the empty squares, never what's actually on them) via a small
+  ephemeral relay — never stored, purely a "something's happening" courtesy
+  so the board doesn't look frozen mid-turn. Each turn has a **2-minute
+  clock**; running out is a **lost turn**, not a pass — it skips to the next
+  player without counting toward the real-Scrabble "everyone passed in a
+  row" end condition, so simply being slow can't accidentally end the game
+  (any connected client can report the deadline passing, not just the
+  current player's own, so a dropped connection can't stall it either — the
+  host also has a manual **⏭ Skip round** override in the header). Word
+  validity is checked against a bundled public-domain word list (the ENABLE
+  word list — see `lib/games/data/wordlist.LICENSE.txt`) rather than a live API,
   so a round never depends on an external dictionary service staying up;
   it's loaded via a dynamic import server-side only, so the ~1.6MB word
   list never gets shipped to anyone's browser. The game ends when someone

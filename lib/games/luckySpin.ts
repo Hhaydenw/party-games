@@ -12,6 +12,16 @@ const VOWELS = new Set(["A", "E", "I", "O", "U"]);
 const VOWEL_COST = 250;
 const DEFAULT_ROUNDS = 5;
 
+// How long the wheel visually spins for, from every client's perspective —
+// exported so the view component drives its CSS animation off the exact
+// same number rather than guessing a matching duration independently. This
+// is set server-side as a real deadline (`spinEndsAt`, an absolute
+// timestamp like every other timer in this app) rather than left as a
+// purely client-local `setTimeout`, specifically so every player's client
+// — not just whoever clicked Spin — can derive "is a spin currently
+// animating" from the exact same source of truth.
+export const SPIN_DURATION_MS = 2600;
+
 // Dollar segments plus two penalty segments — a smaller wheel than the real
 // show's ~24 wedges, but the same flavor (mostly cash, occasional trap).
 export type WheelSegment = number | "BANKRUPT" | "LOSE_TURN";
@@ -150,6 +160,7 @@ export interface LuckySpinState {
   currentSegmentValue: number | null;
   lastSpinResult: WheelSegment | null;
   lastSpinIndex: number | null;
+  spinEndsAt: number | null;
   roundLog: string[];
   lastRoundResult: { winnerId: PlayerId | null; phrase: string; reason: string } | null;
 }
@@ -171,6 +182,7 @@ export interface LuckySpinView {
   currentSegmentValue: number | null;
   lastSpinResult: WheelSegment | null;
   lastSpinIndex: number | null;
+  spinEndsAt: number | null;
   canBuyVowel: boolean;
   roundLog: string[];
   lastRoundResult: LuckySpinState["lastRoundResult"];
@@ -207,6 +219,7 @@ function startRound(state: LuckySpinState, roundIndex: number): LuckySpinState {
     currentSegmentValue: null,
     lastSpinResult: null,
     lastSpinIndex: null,
+    spinEndsAt: null,
     roundLog: [`Round ${roundIndex + 1}: category is "${puzzle.category}"`],
     lastRoundResult: null,
   };
@@ -248,6 +261,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       currentSegmentValue: null,
       lastSpinResult: null,
       lastSpinIndex: null,
+      spinEndsAt: null,
       roundLog: [],
       lastRoundResult: null,
     };
@@ -271,6 +285,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
           roundEarnings,
           lastSpinResult: segment,
           lastSpinIndex: segmentIndex,
+          spinEndsAt: Date.now() + SPIN_DURATION_MS,
           ...passTurn(state),
           roundLog: [...state.roundLog, `${currentPlayerId} spun BANKRUPT and loses this round's earnings!`].slice(-30),
         };
@@ -280,6 +295,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
           ...state,
           lastSpinResult: segment,
           lastSpinIndex: segmentIndex,
+          spinEndsAt: Date.now() + SPIN_DURATION_MS,
           ...passTurn(state),
           roundLog: [...state.roundLog, `${currentPlayerId} spun Lose a Turn.`].slice(-30),
         };
@@ -289,6 +305,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
         currentSegmentValue: segment,
         lastSpinResult: segment,
         lastSpinIndex: segmentIndex,
+        spinEndsAt: Date.now() + SPIN_DURATION_MS,
         roundLog: [...state.roundLog, `${currentPlayerId} spun $${segment}.`].slice(-30),
       };
     }
@@ -397,6 +414,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       currentSegmentValue: state.currentSegmentValue,
       lastSpinResult: state.lastSpinResult,
       lastSpinIndex: state.lastSpinIndex,
+      spinEndsAt: state.spinEndsAt,
       canBuyVowel: (state.roundEarnings[currentPlayerId] ?? 0) >= VOWEL_COST,
       roundLog: substituteNames(state.roundLog.slice(-8), state.order, players),
       lastRoundResult: state.lastRoundResult,
