@@ -76,10 +76,17 @@ function Wheel({ spinning, lastSpinIndex }: { spinning: boolean; lastSpinIndex: 
   const gradient = WHEEL.map((seg, i) => `${segColor(seg, i)} ${i * SEG_ANGLE}deg ${(i + 1) * SEG_ANGLE}deg`).join(", ");
 
   return (
-    <div className="relative h-56 w-56 shrink-0">
+    // Bumped up from 224px to 288px — 16 wedges at 22.5° each left almost
+    // no room for a label plus the pointer/hub, especially "BANKRUPT".
+    // Kept to 288px rather than going bigger still since this needs to fit
+    // inside a phone screen without causing horizontal scroll (the game
+    // content column has its own padding on top of the viewport's, leaving
+    // well under 320px of clear width on a lot of phones). The label
+    // radius below is scaled to match.
+    <div className="relative h-[288px] w-[288px] shrink-0">
       <div
         className="absolute left-1/2 top-0 z-10 h-0 w-0 -translate-x-1/2 -translate-y-1"
-        style={{ borderLeft: "10px solid transparent", borderRight: "10px solid transparent", borderTop: "16px solid #f2b705" }}
+        style={{ borderLeft: "12px solid transparent", borderRight: "12px solid transparent", borderTop: "20px solid #f2b705" }}
       />
       <div
         className={`h-full w-full rounded-full border-4 shadow-2xl transition-transform ${spinning ? "border-gold/60" : "border-white/20"}`}
@@ -93,18 +100,31 @@ function Wheel({ spinning, lastSpinIndex }: { spinning: boolean; lastSpinIndex: 
       >
         {WHEEL.map((seg, i) => {
           const angle = i * SEG_ANGLE + SEG_ANGLE / 2;
+          // Without this, labels on the lower half of the wheel (roughly
+          // 90°–270°, i.e. past 3 o'clock going down to 9 o'clock) render
+          // upside-down and mirrored — the label div is rotated to point
+          // radially outward, and past the halfway point that orientation
+          // reads backward. Flipping those specific labels another 180°
+          // keeps every label within ±90° of horizontal, so nothing is
+          // ever upside-down, at the cost of those labels pointing
+          // "inward" instead of "outward" (still perfectly legible).
+          const flip = angle > 90 && angle < 270;
           return (
             <div
               key={i}
               className="absolute left-1/2 top-1/2 h-0 w-0 origin-top-left"
-              style={{ transform: `rotate(${angle}deg) translate(0, -92px)` }}
+              style={{ transform: `rotate(${angle}deg) translate(0, -118px)` }}
             >
-              <span className="block -translate-x-1/2 whitespace-nowrap text-[10px] font-black text-white drop-shadow">{segLabel(seg)}</span>
+              <span
+                className={`block whitespace-nowrap text-xs font-black text-white drop-shadow ${flip ? "-translate-x-1/2 rotate-180" : "-translate-x-1/2"}`}
+              >
+                {segLabel(seg)}
+              </span>
             </div>
           );
         })}
       </div>
-      <div className="absolute inset-0 m-auto flex h-14 w-14 items-center justify-center rounded-full border-4 border-ink bg-gold text-lg">🎡</div>
+      <div className="absolute inset-0 m-auto flex h-16 w-16 items-center justify-center rounded-full border-4 border-ink bg-gold text-xl">🎡</div>
     </div>
   );
 }

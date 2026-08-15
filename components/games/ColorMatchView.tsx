@@ -71,10 +71,20 @@ export default function ColorMatchView({
     onAction({ type: "submitGuess", color: draft });
   }
 
+  // The track shows the actual gradient of colors this channel would
+  // produce across its full range, with the *other* two channels held at
+  // their current values — so the slider itself answers "what will moving
+  // this do?" instead of making you guess and check the preview swatch.
+  const CHANNEL_LABEL_COLOR: Record<"r" | "g" | "b", string> = { r: "text-red-400", g: "text-emerald-400", b: "text-blue-400" };
+  function trackGradient(channel: "r" | "g" | "b"): string {
+    const lo = { ...draft, [channel]: 0 };
+    const hi = { ...draft, [channel]: 255 };
+    return `linear-gradient(to right, ${rgbCss(lo)}, ${rgbCss(hi)})`;
+  }
   function Slider({ channel, label }: { channel: "r" | "g" | "b"; label: string }) {
     return (
       <label className="flex items-center gap-3">
-        <span className="w-4 text-xs font-bold text-slate-400">{label}</span>
+        <span className={`w-4 text-xs font-black ${CHANNEL_LABEL_COLOR[channel]}`}>{label}</span>
         <input
           type="range"
           min={0}
@@ -82,7 +92,8 @@ export default function ColorMatchView({
           value={draft[channel]}
           disabled={view.youSubmitted}
           onChange={(e) => setDraft((d) => ({ ...d, [channel]: Number(e.target.value) }))}
-          className="flex-1 accent-accent"
+          className="color-slider flex-1"
+          style={{ background: trackGradient(channel) }}
         />
         <span className="w-9 text-right font-mono text-xs text-slate-400">{draft[channel]}</span>
       </label>

@@ -6,7 +6,6 @@ import TriviaView from "@/components/games/TriviaView";
 import DrawingView from "@/components/games/DrawingView";
 import FamilyFeudView from "@/components/games/FamilyFeudView";
 import NameThatTuneView from "@/components/games/NameThatTuneView";
-import LifeView from "@/components/games/LifeView";
 import MonopolyView from "@/components/games/MonopolyView";
 import TanksView from "@/components/games/TanksView";
 import PaddleBattleView from "@/components/games/PaddleBattleView";
@@ -46,8 +45,6 @@ export default function GameView({
       return <FamilyFeudView view={view as any} onAction={onAction} meId={meId} players={players} />;
     case "name-that-tune":
       return <NameThatTuneView view={view as any} onAction={onAction} meId={meId} players={players} />;
-    case "life":
-      return <LifeView view={view as any} onAction={onAction} meId={meId} players={players} />;
     case "monopoly":
       return <MonopolyView view={view as any} onAction={onAction} meId={meId} players={players} />;
     case "tanks":

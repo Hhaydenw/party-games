@@ -25,7 +25,6 @@ Sixteen games are fully implemented:
 | **Street Snap** (photo-guessing, needs setup — see below) | 📱 Party | 2–8 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
 | **Paddle Battle** (Pong-style) | 📱 Party (real-time) | 2 |
-| **The Game of Life** | 🎲 Board | 2–6 |
 | **Monopoly** | 🎲 Board | 2–6 |
 
 **Series Mode**: instead of one game, the host can queue up several in a row
@@ -120,7 +119,7 @@ The host can tune each round-based game before starting it — a **Settings** pa
 appears in the lobby once a game is picked (rounds; Trivia Night also gets
 category/difficulty; Name That Tune gets genre/decade; Tank Arena and Void
 Raiders get match length, Tank Arena also gets solo-vs-teams; Paddle Battle gets
-the winning score). Board games (Uno, Life, Monopoly) don't have a settings
+the winning score). Board games (Uno, Monopoly) don't have a settings
 panel since they play to a win condition rather than N rounds.
 
 **Freshness**: every trivia/question/song-based game is designed not to repeat
@@ -144,11 +143,6 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   get a grace period to mortgage their way out of it first. The host can also
   force-end the game at any time — the richest player (cash + property
   value) wins — since real Monopoly games can run long at a party.
-- **The Game of Life** has piece selection and a winding road-style board (an
-  SVG path, not a plain grid) with a mountain at the start, a resort glow at
-  retirement, and a real 10-segment spinner wheel. Still simplified: single
-  track (no board forks), no stock/business spaces, no insurance, house values
-  don't fluctuate.
 - **Family Feud**'s face-off is a real buzz-in: first captain to buzz gets the
   first guess, and if they miss it passes to the other captain. Guessing while in
   control rotates through your team in order rather than letting everyone answer
