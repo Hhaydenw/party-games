@@ -22,14 +22,21 @@ const DEFAULT_ROUNDS = 5;
 // animating" from the exact same source of truth.
 export const SPIN_DURATION_MS = 2600;
 
-// Dollar segments plus two penalty segments — a smaller wheel than the real
-// show's ~24 wedges, but the same flavor (mostly cash, occasional trap).
+// Dollar segments plus penalty segments — 24 wedges, matching the real
+// show's wheel count (an original wedge/value layout, not a copy of any
+// specific broadcast wheel), with the same flavor: mostly cash in a
+// realistic-looking spread, a couple of Bankrupt traps, one Lose a Turn,
+// and one stand-out high-value "jackpot" wedge.
 export type WheelSegment = number | "BANKRUPT" | "LOSE_TURN";
 // Exported (as a real value, not just a type) so the client can render an
 // actual wheel with these exact wedges in this exact order, and rotate it
 // to the specific wedge the server picked rather than just displaying the
 // resulting dollar amount in a spinning circle.
-export const WHEEL: WheelSegment[] = [500, 600, 700, 800, 300, 900, 400, 650, "BANKRUPT", 750, 850, "LOSE_TURN", 550, 300, 400, 600];
+export const WHEEL: WheelSegment[] = [
+  600, 700, 900, 500, 800, 2500, "BANKRUPT", 600,
+  700, 650, 900, "LOSE_TURN", 500, 800, 600, 900,
+  750, 550, "BANKRUPT", 700, 600, 500, 850, 650,
+];
 
 interface PuzzleDef {
   category: string;

@@ -38,12 +38,16 @@ export interface CameraState {
   pitch: number;
   zoom: number;
   // Post-capture editing — a CSS filter preset id (see FILTER_PRESETS in
-  // the view component) and a pan/zoom "crop" window (percentages/scale
-  // applied at display time). Both are pure presentation — nothing is ever
-  // exported/rendered to a static file; the same live Street View image is
-  // just re-framed and filtered via CSS wherever it's shown, same as the
-  // rest of this game's "never extract the imagery" approach.
+  // the view component), fine-tune adjustments layered on top of it, and a
+  // pan/zoom "crop" window (percentages/scale applied at display time).
+  // All of this is pure presentation — nothing is ever exported/rendered
+  // to a static file; the same live Street View image is just re-framed
+  // and filtered via CSS wherever it's shown, same as the rest of this
+  // game's "never extract the imagery" approach.
   filter?: string;
+  brightness?: number; // 0-200, 100 = unchanged
+  contrast?: number; // 0-200, 100 = unchanged
+  saturation?: number; // 0-200, 100 = unchanged
   cropX?: number; // 0-100
   cropY?: number; // 0-100
   cropScale?: number; // >= 1

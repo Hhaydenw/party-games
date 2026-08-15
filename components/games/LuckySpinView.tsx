@@ -11,10 +11,17 @@ const VOWELS = "AEIOU".split("");
 const SEG_ANGLE = 360 / WHEEL.length;
 const SPIN_FULL_TURNS = 4;
 
+// A wider, higher-contrast palette (12 hues vs. the old 6) so adjacent
+// wedges read as distinctly different at a glance, closer to the real
+// wheel's dense, colorful look now that there are 24 of them.
 function segColor(seg: WheelSegment, i: number): string {
   if (seg === "BANKRUPT") return "#0f1117";
   if (seg === "LOSE_TURN") return "#475569";
-  const palette = ["#e94560", "#f2b705", "#22c55e", "#3b82f6", "#a855f7", "#14b8a6"];
+  const palette = [
+    "#22c55e", "#f97316", "#3b82f6", "#e94560",
+    "#a855f7", "#f2b705", "#14b8a6", "#ec4899",
+    "#6366f1", "#84cc16", "#06b6d4", "#f43f5e",
+  ];
   return palette[i % palette.length]!;
 }
 function segLabel(seg: WheelSegment): string {
@@ -64,7 +71,7 @@ function Wheel({ rotation, spinning }: { rotation: number; spinning: boolean }) 
               style={{ transform: `rotate(${angle}deg) translate(0, -180px)` }}
             >
               <span
-                className="block -translate-x-1/2 text-sm font-black text-white drop-shadow"
+                className="block -translate-x-1/2 text-xs font-black text-white drop-shadow"
                 style={{ writingMode: "vertical-rl", textOrientation: "upright", letterSpacing: "-1px" }}
               >
                 {segLabel(seg)}

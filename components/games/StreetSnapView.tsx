@@ -69,14 +69,51 @@ const FILTER_PRESETS = [
   { id: "vivid", label: "Vivid", css: "saturate(1.6) contrast(1.15)" },
   { id: "noir", label: "Noir", css: "grayscale(1) contrast(1.4) brightness(0.9)" },
 ] as const;
-function filterCss(id?: string): string {
-  return FILTER_PRESETS.find((f) => f.id === id)?.css ?? "";
+// Combines the chosen filter preset with the fine-tune brightness/contrast/
+// saturation adjustments into one CSS `filter` value — the preset (if any)
+// supplies a baseline look, and the sliders layer additional adjustment
+// functions on top, which is exactly how chained CSS filter functions are
+// meant to compose (each one applies to the result of the last).
+function editCss(edit: { filter?: string; brightness?: number; contrast?: number; saturation?: number }): string {
+  const preset = FILTER_PRESETS.find((f) => f.id === edit.filter)?.css ?? "";
+  const parts: string[] = [preset];
+  const brightness = edit.brightness ?? 100;
+  const contrast = edit.contrast ?? 100;
+  const saturation = edit.saturation ?? 100;
+  if (brightness !== 100) parts.push(`brightness(${brightness / 100})`);
+  if (contrast !== 100) parts.push(`contrast(${contrast / 100})`);
+  if (saturation !== 100) parts.push(`saturate(${saturation / 100})`);
+  return parts.filter(Boolean).join(" ");
 }
 function cropTransform(camera: CameraState): string {
   const x = camera.cropX ?? 50;
   const y = camera.cropY ?? 50;
   const scale = camera.cropScale ?? 1;
   return `translate(${50 - x}%, ${50 - y}%) scale(${scale})`;
+}
+
+// A real top-level component (not declared inside ExploringPanel's render
+// body) — a lesson learned the hard way on Color Match's sliders, where a
+// per-render-redeclared component meant React tore down and rebuilt the
+// underlying <input> on every parent re-render, breaking mid-drag. min=0
+// max=200 with 100 as the unchanged midpoint mirrors how brightness/
+// contrast/saturate CSS filter functions themselves work (1.0 = 100% =
+// no change).
+function EditSlider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-slate-400">
+      <span className="w-24 shrink-0 text-left">{label}</span>
+      <input
+        type="range"
+        min={0}
+        max={200}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="flex-1 accent-accent"
+      />
+      <span className="w-9 shrink-0 text-right font-mono">{value}%</span>
+    </label>
+  );
 }
 
 export default function StreetSnapView({
@@ -299,18 +336,24 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   // photo" is pressed.
   const [pendingCamera, setPendingCamera] = useState<CameraState | null>(null);
   const [filterId, setFilterId] = useState("none");
+  const [brightness, setBrightness] = useState(100);
+  const [contrast, setContrast] = useState(100);
+  const [saturation, setSaturation] = useState(100);
   const [cropPos, setCropPos] = useState({ x: 50, y: 50 });
   const [cropScale, setCropScale] = useState(1);
   const pendingRef = useRef<CameraState | null>(null);
   pendingRef.current = pendingCamera;
-  const editRef = useRef({ filterId, cropPos, cropScale });
-  editRef.current = { filterId, cropPos, cropScale };
+  const editRef = useRef({ filterId, brightness, contrast, saturation, cropPos, cropScale });
+  editRef.current = { filterId, brightness, contrast, saturation, cropPos, cropScale };
 
   function startReview() {
     if (submittedRef.current || pendingCamera) return;
     playSound("shutter");
     setPendingCamera(captureCurrentCamera());
     setFilterId("none");
+    setBrightness(100);
+    setContrast(100);
+    setSaturation(100);
     setCropPos({ x: 50, y: 50 });
     setCropScale(1);
     if (aiming) exitAiming();
@@ -321,7 +364,10 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   function confirmSubmit() {
     if (!pendingCamera) return;
     playSound("select");
-    onAction({ type: "submitPhoto", camera: { ...pendingCamera, filter: filterId, cropX: cropPos.x, cropY: cropPos.y, cropScale } });
+    onAction({
+      type: "submitPhoto",
+      camera: { ...pendingCamera, filter: filterId, brightness, contrast, saturation, cropX: cropPos.x, cropY: cropPos.y, cropScale },
+    });
     setPendingCamera(null);
   }
 
@@ -361,8 +407,8 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
       if (submittedRef.current || autoSubmitted.current) return;
       autoSubmitted.current = true;
       const base = pendingRef.current ?? captureCurrentCamera();
-      const { filterId: f, cropPos: c, cropScale: s } = editRef.current;
-      onAction({ type: "submitPhoto", camera: { ...base, filter: f, cropX: c.x, cropY: c.y, cropScale: s } });
+      const { filterId: f, brightness: b, contrast: c2, saturation: s2, cropPos: c, cropScale: s } = editRef.current;
+      onAction({ type: "submitPhoto", camera: { ...base, filter: f, brightness: b, contrast: c2, saturation: s2, cropX: c.x, cropY: c.y, cropScale: s } });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, msLeft + 50);
     return () => clearTimeout(t);
@@ -459,7 +505,7 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
               draggable={false}
               className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
               style={{
-                filter: filterCss(filterId),
+                filter: editCss({ filter: filterId, brightness, contrast, saturation }),
                 transform: `translate(${50 - cropPos.x}%, ${50 - cropPos.y}%) scale(${cropScale})`,
               }}
             />
@@ -498,6 +544,26 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
                 {f.label}
               </button>
             ))}
+          </div>
+          {/* Fine-tune sliders layered on top of whichever preset's chosen
+              above — same live-CSS approach as everything else here, never
+              baked into an exported image. */}
+          <div className="flex w-full max-w-xs flex-col gap-1.5">
+            <EditSlider label="☀️ Brightness" value={brightness} onChange={setBrightness} />
+            <EditSlider label="◐ Contrast" value={contrast} onChange={setContrast} />
+            <EditSlider label="🎨 Saturation" value={saturation} onChange={setSaturation} />
+            {(brightness !== 100 || contrast !== 100 || saturation !== 100) && (
+              <button
+                className="self-center text-xs text-slate-500 underline hover:text-slate-300"
+                onClick={() => {
+                  setBrightness(100);
+                  setContrast(100);
+                  setSaturation(100);
+                }}
+              >
+                Reset adjustments
+              </button>
+            )}
           </div>
           <div className="flex gap-3">
             <button className="btn-secondary" onClick={retake}>
@@ -543,6 +609,7 @@ function PhotoGrid({
   interactive: boolean;
 }) {
   const photos = view.photos ?? [];
+  const [enlarged, setEnlarged] = useState<{ camera: CameraState; label: string } | null>(null);
   if (photos.length === 0) {
     return <p className="text-sm text-slate-400">Nobody submitted a photo this round.</p>;
   }
@@ -560,15 +627,17 @@ function PhotoGrid({
         const isMine = p.playerId === meId;
         const isMyVote = view.yourVote === p.playerId;
         const isLeading = !interactive && p.votes > 0 && p.votes === maxVotes;
+        const label = isMine ? "Your photo" : nameFor(p.playerId);
         return (
           <PhotoTile
             key={p.playerId}
             apiKey={view.mapsApiKey}
             camera={p.camera}
-            label={isMine ? "Your photo" : nameFor(p.playerId)}
+            label={label}
             votes={p.votes}
             voterNames={p.voters.map(nameFor)}
             highlighted={isMyVote || isLeading}
+            onEnlarge={p.camera ? () => setEnlarged({ camera: p.camera!, label }) : undefined}
           >
             {interactive && !isMine && (
               <button
@@ -584,6 +653,9 @@ function PhotoGrid({
           </PhotoTile>
         );
       })}
+      {enlarged && (
+        <PhotoLightbox apiKey={view.mapsApiKey} camera={enlarged.camera} label={enlarged.label} onClose={() => setEnlarged(null)} />
+      )}
     </div>
   );
 }
@@ -595,6 +667,7 @@ function PhotoTile({
   votes,
   voterNames,
   highlighted,
+  onEnlarge,
   children,
 }: {
   apiKey: string;
@@ -603,24 +676,31 @@ function PhotoTile({
   votes: number;
   voterNames: string[];
   highlighted: boolean;
+  onEnlarge?: () => void;
   children?: React.ReactNode;
 }) {
   const [loaded, setLoaded] = useState(false);
   return (
     <div className={`overflow-hidden rounded-2xl border p-3 transition ${highlighted ? "border-gold ring-2 ring-gold/50" : "border-white/10"}`}>
-      <div className="relative aspect-video overflow-hidden rounded-xl bg-black">
+      <button
+        type="button"
+        className="relative block aspect-video w-full cursor-zoom-in overflow-hidden rounded-xl bg-black"
+        onClick={onEnlarge}
+        disabled={!camera || !onEnlarge}
+        title="Click to enlarge"
+      >
         {camera && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={buildStaticStreetViewUrl(apiKey, camera)}
             alt={`Photo by ${label}`}
             className="absolute inset-0 h-full w-full object-cover"
-            style={{ filter: filterCss(camera.filter), transform: cropTransform(camera) }}
+            style={{ filter: editCss(camera), transform: cropTransform(camera) }}
             onLoad={() => setLoaded(true)}
           />
         )}
         {!loaded && <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-400">Loading photo…</div>}
-      </div>
+      </button>
       <div className="mt-2 flex items-center justify-between">
         <p className="text-sm font-semibold">{label}</p>
         <span className="text-xs font-bold text-gold">
@@ -631,6 +711,41 @@ function PhotoTile({
           real time as votes come in during the voting phase itself. */}
       {voterNames.length > 0 && <p className="mt-1 truncate text-xs text-slate-400">❤️ {voterNames.join(", ")}</p>}
       {children}
+    </div>
+  );
+}
+
+// A simple full-screen overlay showing the same image bigger, dismissed by
+// clicking the backdrop, the ✕ button, or Escape.
+function PhotoLightbox({ apiKey, camera, label, onClose }: { apiKey: string; camera: CameraState; label: string; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onClick={onClose}>
+      <div className="relative w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
+        <button
+          className="absolute -top-10 right-0 rounded-full bg-white/10 px-3 py-1.5 text-sm text-white hover:bg-white/20"
+          onClick={onClose}
+        >
+          ✕ Close
+        </button>
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={buildStaticStreetViewUrl(apiKey, camera)}
+            alt={`Photo by ${label}`}
+            className="block h-auto w-full"
+            style={{ filter: editCss(camera), transform: cropTransform(camera) }}
+          />
+        </div>
+        <p className="mt-2 text-center text-sm text-slate-300">{label}</p>
+      </div>
     </div>
   );
 }
