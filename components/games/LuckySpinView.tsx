@@ -120,16 +120,30 @@ export default function LuckySpinView({
   const spinning = view.spinEndsAt !== null && serverNow() < view.spinEndsAt;
 
   // The wheel's rotation target — recomputed whenever the server hands us
-  // a new `lastSpinIndex`, continuing smoothly from wherever it currently
-  // sits rather than resetting, so a spin landing while a previous spin's
+  // a *new spin*, continuing smoothly from wherever it currently sits
+  // rather than resetting, so a spin landing while a previous spin's
   // animation hasn't fully settled yet (possible right after Bankrupt/Lose
   // a Turn immediately passes the turn to someone who spins again) still
   // reads as one continuous motion instead of jumping.
+  //
+  // "Is this a new spin" is keyed off `spinSeq` (a plain incrementing
+  // counter, bumped once per spin server-side), not `lastSpinIndex` — that
+  // used to be the bug behind a spin occasionally just not animating at
+  // all. `lastSpinIndex` is a wedge index (0-15), which two different
+  // spins can perfectly legitimately land on again — a ~6% chance on any
+  // given spin, compounding across a whole game's worth of spins — and
+  // this effect only re-runs when its dependency's *value* actually
+  // changes, so landing on the same wedge as the last spin this client
+  // processed left it reading identically to before and nothing
+  // re-triggered. (An earlier attempt at this fix keyed off `spinEndsAt`
+  // instead, assuming a millisecond timestamp couldn't collide — it can,
+  // between two spins close enough together, which a quick test caught.
+  // `spinSeq` can't collide, full stop.)
   const [rotation, setRotation] = useState(0);
-  const prevIndex = useRef<number | null>(null);
+  const prevSpinSeq = useRef<number | null>(null);
   useEffect(() => {
-    if (view.lastSpinIndex === null || view.lastSpinIndex === prevIndex.current) return;
-    prevIndex.current = view.lastSpinIndex;
+    if (view.lastSpinIndex === null || view.spinSeq === prevSpinSeq.current) return;
+    prevSpinSeq.current = view.spinSeq;
     const wedgeCenter = view.lastSpinIndex * SEG_ANGLE + SEG_ANGLE / 2;
     const targetMod = (360 - wedgeCenter + 360) % 360;
     setRotation((prev) => {
@@ -149,7 +163,7 @@ export default function LuckySpinView({
       timers.push(setTimeout(() => playSound("click"), t));
     }
     return () => timers.forEach(clearTimeout);
-  }, [view.lastSpinIndex]);
+  }, [view.spinSeq, view.lastSpinIndex]);
 
   function spin() {
     playSound("click");
@@ -278,6 +292,23 @@ export default function LuckySpinView({
         </div>
       )}
 
+      {/* Per-round earnings only ever showed "this round" amounts, with no
+          running total visible anywhere until a round actually ended —
+          this strip is the game's cumulative winnings, visible the whole
+          time (it's what actually determines who's winning). */}
+      <div className="flex flex-col items-center gap-1.5">
+        <p className="text-[10px] uppercase tracking-widest text-slate-500">Total winnings</p>
+        <div className="flex flex-wrap justify-center gap-3 text-sm">
+          {[...view.totalScores]
+            .sort((a, b) => b.score - a.score)
+            .map((s) => (
+              <span key={s.playerId} className="rounded-xl bg-white/5 px-3 py-1.5 font-semibold">
+                {nameFor(s.playerId)}: ${s.score}
+              </span>
+            ))}
+        </div>
+      </div>
+
       <div className="flex flex-wrap justify-center gap-3 text-sm">
         {view.roundEarnings.map((e) => (
           <span key={e.playerId} className={`rounded-xl px-3 py-1.5 ${e.playerId === view.currentPlayerId && view.phase === "playing" ? "bg-accent/20 ring-1 ring-accent/40" : "bg-white/5"}`}>
@@ -293,15 +324,6 @@ export default function LuckySpinView({
               {view.lastRoundResult.winnerId ? `${nameFor(view.lastRoundResult.winnerId)} ${view.lastRoundResult.reason}!` : "Round over."}
             </p>
           )}
-          <div className="flex flex-wrap justify-center gap-3 text-sm">
-            {[...view.totalScores]
-              .sort((a, b) => b.score - a.score)
-              .map((s) => (
-                <span key={s.playerId} className="rounded-xl bg-white/5 px-3 py-1.5">
-                  {nameFor(s.playerId)}: ${s.score}
-                </span>
-              ))}
-          </div>
           {view.phase === "roundEnd" && isHost && (
             <button className="btn-primary" onClick={() => onAction({ type: "advance" })}>
               {view.roundIndex + 1 >= view.totalRounds ? "See final results" : "Next puzzle"}

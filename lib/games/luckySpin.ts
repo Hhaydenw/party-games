@@ -161,6 +161,12 @@ export interface LuckySpinState {
   lastSpinResult: WheelSegment | null;
   lastSpinIndex: number | null;
   spinEndsAt: number | null;
+  // Increments on every spin action — a robust, always-unique "is this a
+  // new spin" signal for the client, unlike lastSpinIndex (a wedge index,
+  // 0-15, which two different spins can legitimately land on again) or
+  // spinEndsAt (a millisecond timestamp, which two back-to-back spins can
+  // in principle collide on).
+  spinSeq: number;
   roundLog: string[];
   lastRoundResult: { winnerId: PlayerId | null; phrase: string; reason: string } | null;
 }
@@ -183,6 +189,7 @@ export interface LuckySpinView {
   lastSpinResult: WheelSegment | null;
   lastSpinIndex: number | null;
   spinEndsAt: number | null;
+  spinSeq: number;
   canBuyVowel: boolean;
   roundLog: string[];
   lastRoundResult: LuckySpinState["lastRoundResult"];
@@ -262,6 +269,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       lastSpinResult: null,
       lastSpinIndex: null,
       spinEndsAt: null,
+      spinSeq: 0,
       roundLog: [],
       lastRoundResult: null,
     };
@@ -286,6 +294,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
           lastSpinResult: segment,
           lastSpinIndex: segmentIndex,
           spinEndsAt: Date.now() + SPIN_DURATION_MS,
+          spinSeq: state.spinSeq + 1,
           ...passTurn(state),
           roundLog: [...state.roundLog, `${currentPlayerId} spun BANKRUPT and loses this round's earnings!`].slice(-30),
         };
@@ -296,6 +305,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
           lastSpinResult: segment,
           lastSpinIndex: segmentIndex,
           spinEndsAt: Date.now() + SPIN_DURATION_MS,
+          spinSeq: state.spinSeq + 1,
           ...passTurn(state),
           roundLog: [...state.roundLog, `${currentPlayerId} spun Lose a Turn.`].slice(-30),
         };
@@ -306,6 +316,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
         lastSpinResult: segment,
         lastSpinIndex: segmentIndex,
         spinEndsAt: Date.now() + SPIN_DURATION_MS,
+        spinSeq: state.spinSeq + 1,
         roundLog: [...state.roundLog, `${currentPlayerId} spun $${segment}.`].slice(-30),
       };
     }
@@ -415,6 +426,7 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       lastSpinResult: state.lastSpinResult,
       lastSpinIndex: state.lastSpinIndex,
       spinEndsAt: state.spinEndsAt,
+      spinSeq: state.spinSeq,
       canBuyVowel: (state.roundEarnings[currentPlayerId] ?? 0) >= VOWEL_COST,
       roundLog: substituteNames(state.roundLog.slice(-8), state.order, players),
       lastRoundResult: state.lastRoundResult,
