@@ -240,15 +240,27 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
       // ignore — panorama may not be constructed yet
     }
   }
+  // Google's own click-and-drag rotation is bound internally to the *left*
+  // mouse button, so once right-click is claimed for aiming, holding it
+  // down doesn't rotate the view via the widget's own handling — we have
+  // to drive `setPov()` ourselves from raw mouse movement while aiming.
+  const lastDragPosRef = useRef<{ x: number; y: number } | null>(null);
+  const povRef = useRef<{ heading: number; pitch: number } | null>(null);
+  const ROTATE_DEG_PER_PX = 0.15;
+
   function enterAiming() {
     if (!ready || submittedRef.current || pendingCamera || aimingRef.current) return;
     setAiming(true);
     setClickToGo(false);
+    lastDragPosRef.current = null;
+    povRef.current = panoramaRef.current?.getPov() ?? null;
   }
   function exitAiming() {
     if (!aimingRef.current) return;
     setAiming(false);
     setClickToGo(true);
+    lastDragPosRef.current = null;
+    povRef.current = null;
   }
   useEffect(() => {
     // Window-level listeners so releasing the right mouse button (or
@@ -260,6 +272,19 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") exitAiming();
     }
+    function onWindowMouseMove(e: MouseEvent) {
+      if (!aimingRef.current || !panoramaRef.current) return;
+      const last = lastDragPosRef.current;
+      lastDragPosRef.current = { x: e.clientX, y: e.clientY };
+      if (!last) return; // first move since arming — just establish a baseline, no jump
+      const dx = e.clientX - last.x;
+      const dy = e.clientY - last.y;
+      const base = povRef.current ?? panoramaRef.current.getPov();
+      const heading = base.heading + dx * ROTATE_DEG_PER_PX;
+      const pitch = Math.max(-90, Math.min(90, base.pitch - dy * ROTATE_DEG_PER_PX));
+      povRef.current = { heading, pitch };
+      panoramaRef.current.setPov({ heading, pitch });
+    }
     // Capture phase (the `true` third argument), not bubble — the Street
     // View widget's own internal canvas/drag handling can stop a mouse
     // event from bubbling back up to us, but a capture-phase listener on
@@ -267,9 +292,11 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     // internal element, so it can't be blocked that way.
     window.addEventListener("mouseup", onWindowMouseUp, true);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("mousemove", onWindowMouseMove);
     return () => {
       window.removeEventListener("mouseup", onWindowMouseUp, true);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousemove", onWindowMouseMove);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
