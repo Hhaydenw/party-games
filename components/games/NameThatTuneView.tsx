@@ -30,6 +30,14 @@ export default function NameThatTuneView({
 
   const nameFor = (id: string) => (id === meId ? "You" : players.find((p) => p.id === id)?.name ?? "…");
 
+  // Whatever's typed but never submitted used to carry straight over into
+  // the next round's fields (nothing ever cleared it) — reset both drafts
+  // whenever a new round starts.
+  useEffect(() => {
+    setTitleDraft("");
+    setArtistDraft("");
+  }, [view.roundIndex]);
+
   // The preview clip's own playback volume follows the same persisted
   // volume the rest of the app's sound uses (see lib/sound.ts) — so it
   // starts well below max instead of the browser's default 100%, and stays
@@ -88,17 +96,21 @@ export default function NameThatTuneView({
   // blocked, network hiccup).
   const remainingMs = useCountdown(view.roundEndsAt, isHost, () => onAction({ type: "timeUp" }));
 
-  function submitTitleGuess(e: React.FormEvent) {
+  // One form, one submit — covers whichever field(s) you've actually
+  // filled in (skipping anything already correctly guessed), so tabbing
+  // from title to artist and hitting Enter just works, the same as
+  // submitting a normal form, instead of needing a separate button (and a
+  // separate Enter-to-submit) per field.
+  function submitGuesses(e: React.FormEvent) {
     e.preventDefault();
-    if (!titleDraft.trim()) return;
-    onAction({ type: "guess", field: "title", text: titleDraft.trim() });
-    setTitleDraft("");
-  }
-  function submitArtistGuess(e: React.FormEvent) {
-    e.preventDefault();
-    if (!artistDraft.trim()) return;
-    onAction({ type: "guess", field: "artist", text: artistDraft.trim() });
-    setArtistDraft("");
+    if (titleDraft.trim() && !view.yourTitleCorrect) {
+      onAction({ type: "guess", field: "title", text: titleDraft.trim() });
+      setTitleDraft("");
+    }
+    if (artistDraft.trim() && !view.yourArtistCorrect) {
+      onAction({ type: "guess", field: "artist", text: artistDraft.trim() });
+      setArtistDraft("");
+    }
   }
 
   const revealed = view.phase === "roundEnd" || view.phase === "finished";
@@ -194,46 +206,49 @@ export default function NameThatTuneView({
           </div>
           {/* Title and artist are independent — getting one right doesn't
               lock you out of the other, you can keep guessing it right up
-              until the round ends. */}
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-widest text-slate-500">🎵 Song title</span>
-              {view.yourTitleCorrect ? (
-                <p className="input flex items-center text-sm text-emerald-400">✓ Got it!</p>
-              ) : (
-                <form onSubmit={submitTitleGuess} className="flex gap-1.5">
-                  <input
-                    autoFocus
-                    className="input"
-                    placeholder="Title…"
-                    value={titleDraft}
-                    maxLength={80}
-                    onChange={(e) => setTitleDraft(e.target.value)}
-                  />
-                  <button className="btn-primary shrink-0 px-3">Go</button>
-                </form>
-              )}
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-widest text-slate-500">🎤 Artist</span>
-              {view.yourArtistCorrect ? (
-                <p className="input flex items-center text-sm text-emerald-400">✓ Got it!</p>
-              ) : (
-                <form onSubmit={submitArtistGuess} className="flex gap-1.5">
-                  <input
-                    className="input"
-                    placeholder="Artist…"
-                    value={artistDraft}
-                    maxLength={80}
-                    onChange={(e) => setArtistDraft(e.target.value)}
-                  />
-                  <button className="btn-primary shrink-0 px-3">Go</button>
-                </form>
-              )}
-            </div>
-          </div>
-          {view.yourTitleCorrect && view.yourArtistCorrect && (
+              until the round ends. One form, one submit: fill in whichever
+              you know and hit Guess (or tab from title to artist and hit
+              Enter) — it submits whatever's filled in and skips whatever
+              you've already gotten right. */}
+          {view.yourTitleCorrect && view.yourArtistCorrect ? (
             <p className="text-center text-sm text-emerald-400">You got both! Waiting for the round to end…</p>
+          ) : (
+            <form onSubmit={submitGuesses} className="flex flex-col gap-2">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] uppercase tracking-widest text-slate-500">🎵 Song title</span>
+                  {view.yourTitleCorrect ? (
+                    <p className="input flex items-center text-sm text-emerald-400">✓ Got it!</p>
+                  ) : (
+                    <input
+                      autoFocus
+                      className="input"
+                      placeholder="Title…"
+                      value={titleDraft}
+                      maxLength={80}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                    />
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] uppercase tracking-widest text-slate-500">🎤 Artist</span>
+                  {view.yourArtistCorrect ? (
+                    <p className="input flex items-center text-sm text-emerald-400">✓ Got it!</p>
+                  ) : (
+                    <input
+                      className="input"
+                      placeholder="Artist…"
+                      value={artistDraft}
+                      maxLength={80}
+                      onChange={(e) => setArtistDraft(e.target.value)}
+                    />
+                  )}
+                </div>
+              </div>
+              <button className="btn-primary" disabled={!titleDraft.trim() && !artistDraft.trim()}>
+                Guess
+              </button>
+            </form>
           )}
         </div>
       )}
