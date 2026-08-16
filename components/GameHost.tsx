@@ -94,7 +94,25 @@ export default function GameHost({ room, me }: { room: RoomSummary; me: PlayerIn
     );
   }
 
-  if (!gameView || gameView.gameId !== room.gameId) {
+  // "Play again" (or the host starting a new game of the same type right
+  // after one finishes) replays the same gameId — room:state (status
+  // flips to "in-game") and the fresh game:view for the new session are
+  // broadcast together, but they're two separate socket messages, so
+  // there's a real window where this client has already processed the
+  // new room:state but hasn't received the new game:view yet. Since it's
+  // the *same* gameId as before, the `gameView.gameId !== room.gameId`
+  // check below doesn't catch that the cached view is actually leftover
+  // from the game that just ended — which meant briefly (and in the
+  // field, apparently not just briefly) rendering the previous game's
+  // fully-revealed "finished" screen as if it were the new game's round
+  // one. Every game's own phase enum uses "finished" as its terminal
+  // state, so a room that says we're in-game but whose cached view
+  // claims the game is already over is a reliable, game-agnostic signal
+  // that the view hasn't caught up yet — treat it the same as not
+  // having a view at all until the real update arrives.
+  const cachedPhase = (gameView?.view as { phase?: unknown } | undefined)?.phase;
+  const viewIsStale = room.status === "in-game" && cachedPhase === "finished";
+  if (!gameView || gameView.gameId !== room.gameId || viewIsStale) {
     return <main className="flex min-h-screen items-center justify-center text-slate-400">Loading game…</main>;
   }
 

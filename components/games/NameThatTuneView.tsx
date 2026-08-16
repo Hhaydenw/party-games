@@ -18,7 +18,8 @@ export default function NameThatTuneView({
   players: PlayerInfo[];
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [guessDraft, setGuessDraft] = useState("");
+  const [titleDraft, setTitleDraft] = useState("");
+  const [artistDraft, setArtistDraft] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   // Guards handleEnded() specifically, separate from useCountdown's own
   // internal guard for the fallback path below — the two are independent
@@ -87,20 +88,26 @@ export default function NameThatTuneView({
   // blocked, network hiccup).
   const remainingMs = useCountdown(view.roundEndsAt, isHost, () => onAction({ type: "timeUp" }));
 
-  function submitGuess(e: React.FormEvent) {
+  function submitTitleGuess(e: React.FormEvent) {
     e.preventDefault();
-    if (!guessDraft.trim()) return;
-    onAction({ type: "guess", text: guessDraft.trim() });
-    setGuessDraft("");
+    if (!titleDraft.trim()) return;
+    onAction({ type: "guess", field: "title", text: titleDraft.trim() });
+    setTitleDraft("");
+  }
+  function submitArtistGuess(e: React.FormEvent) {
+    e.preventDefault();
+    if (!artistDraft.trim()) return;
+    onAction({ type: "guess", field: "artist", text: artistDraft.trim() });
+    setArtistDraft("");
   }
 
   const revealed = view.phase === "roundEnd" || view.phase === "finished";
 
   const wasRevealed = useRef(revealed);
   useEffect(() => {
-    if (revealed && !wasRevealed.current) playSound(view.youGuessedCorrectly ? "success" : "reveal");
+    if (revealed && !wasRevealed.current) playSound(view.yourTitleCorrect || view.yourArtistCorrect ? "success" : "reveal");
     wasRevealed.current = revealed;
-  }, [revealed, view.youGuessedCorrectly]);
+  }, [revealed, view.yourTitleCorrect, view.yourArtistCorrect]);
 
   const guessCountRef = useRef(view.guesses.length);
   useEffect(() => {
@@ -173,33 +180,60 @@ export default function NameThatTuneView({
             {view.guesses.map((g) =>
               g.correct ? (
                 <p key={g.id} className="text-emerald-400">
-                  🎉 {nameFor(g.playerId)} got it!{g.bothBonus && " 🎯 title + artist bonus!"}
+                  🎉 {nameFor(g.playerId)} got the {g.field}!
                 </p>
               ) : (
                 <p key={g.id} className="text-slate-300">
-                  <span className="font-semibold text-slate-400">{nameFor(g.playerId)}: </span>
+                  <span className="font-semibold text-slate-400">
+                    {nameFor(g.playerId)} ({g.field}):{" "}
+                  </span>
                   {g.text}
                 </p>
               )
             )}
           </div>
-          {!view.youGuessedCorrectly ? (
-            <form onSubmit={submitGuess} className="flex flex-col gap-1.5">
-              <div className="flex gap-2">
-                <input
-                  autoFocus
-                  className="input"
-                  placeholder="Song title or artist…"
-                  value={guessDraft}
-                  maxLength={80}
-                  onChange={(e) => setGuessDraft(e.target.value)}
-                />
-                <button className="btn-primary shrink-0">Guess</button>
-              </div>
-              <p className="text-center text-xs text-slate-500">Tip: guess both, e.g. "Bohemian Rhapsody - Queen", for bonus points</p>
-            </form>
-          ) : (
-            <p className="text-center text-sm text-emerald-400">You got it! Waiting for the round to end…</p>
+          {/* Title and artist are independent — getting one right doesn't
+              lock you out of the other, you can keep guessing it right up
+              until the round ends. */}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-slate-500">🎵 Song title</span>
+              {view.yourTitleCorrect ? (
+                <p className="input flex items-center text-sm text-emerald-400">✓ Got it!</p>
+              ) : (
+                <form onSubmit={submitTitleGuess} className="flex gap-1.5">
+                  <input
+                    autoFocus
+                    className="input"
+                    placeholder="Title…"
+                    value={titleDraft}
+                    maxLength={80}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                  />
+                  <button className="btn-primary shrink-0 px-3">Go</button>
+                </form>
+              )}
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-slate-500">🎤 Artist</span>
+              {view.yourArtistCorrect ? (
+                <p className="input flex items-center text-sm text-emerald-400">✓ Got it!</p>
+              ) : (
+                <form onSubmit={submitArtistGuess} className="flex gap-1.5">
+                  <input
+                    className="input"
+                    placeholder="Artist…"
+                    value={artistDraft}
+                    maxLength={80}
+                    onChange={(e) => setArtistDraft(e.target.value)}
+                  />
+                  <button className="btn-primary shrink-0 px-3">Go</button>
+                </form>
+              )}
+            </div>
+          </div>
+          {view.yourTitleCorrect && view.yourArtistCorrect && (
+            <p className="text-center text-sm text-emerald-400">You got both! Waiting for the round to end…</p>
           )}
         </div>
       )}
@@ -218,6 +252,34 @@ export default function NameThatTuneView({
               <p className="text-sm text-slate-400">by {view.revealedArtist}</p>
             </div>
           </div>
+
+          {/* Who got what, and how fast — sorted fastest-first by whichever
+              of title/artist they nailed first, so the quickest guessers
+              land at the top. */}
+          {view.results && view.results.length > 0 && (
+            <div className="flex w-full max-w-md flex-col gap-1.5 rounded-2xl bg-white/5 p-3 text-sm">
+              {[...view.results]
+                .sort((a, b) => {
+                  const fastestA = Math.min(...[a.titleMs, a.artistMs].filter((v): v is number => v !== null), Infinity);
+                  const fastestB = Math.min(...[b.titleMs, b.artistMs].filter((v): v is number => v !== null), Infinity);
+                  return fastestA - fastestB;
+                })
+                .map((r) => (
+                  <div key={r.playerId} className="flex items-center justify-between gap-2 rounded-lg bg-black/20 px-3 py-1.5">
+                    <span className="font-semibold text-slate-300">{nameFor(r.playerId)}</span>
+                    <span className="flex gap-3 text-xs">
+                      <span className={r.titleCorrect ? "text-emerald-400" : "text-slate-600"}>
+                        🎵 {r.titleCorrect ? `${(r.titleMs! / 1000).toFixed(1)}s` : "✕"}
+                      </span>
+                      <span className={r.artistCorrect ? "text-emerald-400" : "text-slate-600"}>
+                        🎤 {r.artistCorrect ? `${(r.artistMs! / 1000).toFixed(1)}s` : "✕"}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
+
           <div className="flex flex-wrap justify-center gap-3 text-sm">
             {[...view.scores]
               .sort((a, b) => b.score - a.score)

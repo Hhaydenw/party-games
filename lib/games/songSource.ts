@@ -90,16 +90,68 @@ function upscaleArtwork(url: string | undefined): string | null {
 // Builds a handful of search terms from most-specific to broadest, so a
 // narrow combo (e.g. "electronic" + "1960s", which barely exists) still
 // falls back to something searchable instead of dead-ending the game.
+//
+// This used to produce just 1-2 terms per combo, and searchSongs() stopped
+// querying as soon as *any* of them hit the pool-size floor — which for a
+// popular combo (e.g. plain "pop") meant the very first term's top ~100
+// results were the entire pool, every single game, since iTunes search
+// ranking for a fixed query string is itself fixed. Every room playing
+// "pop" was drawing from the same ~60-100 songs, exhausting fast and
+// repeating often. More, more varied phrasings here (each one is a
+// genuinely different search against iTunes' ranking, surfacing different
+// songs) plus never stopping early (below) directly targets that.
 function buildSearchTerms(genre: string, decade: string): string[] {
   const genreLabel = genre !== "all" ? (GENRE_LABEL[genre] ?? "") : "";
   const decadeLabel = decade !== "all" ? decade : "";
   const terms: string[] = [];
-  if (genre === "billboard") terms.push(`${decadeLabel} billboard hot 100`.trim(), "billboard number one hits");
-  else if (genre === "tv") terms.push(`${decadeLabel} tv show theme song`.trim(), "songs featured in tv shows");
-  else if (genreLabel && decadeLabel) terms.push(`${decadeLabel} ${genreLabel} hits`, `best ${genreLabel} songs ${decadeLabel}`);
-  else if (genreLabel) terms.push(`best ${genreLabel} hits`, `top ${genreLabel} songs`);
-  else if (decadeLabel) terms.push(`${decadeLabel} greatest hits`, `${decadeLabel} number one songs`);
-  else terms.push("today's biggest hits", "greatest hits of all time", "classic hit songs");
+  if (genre === "billboard") {
+    terms.push(
+      `${decadeLabel} billboard hot 100`.trim(),
+      "billboard number one hits",
+      `${decadeLabel} billboard top songs`.trim(),
+      "billboard chart toppers"
+    );
+  } else if (genre === "tv") {
+    terms.push(
+      `${decadeLabel} tv show theme song`.trim(),
+      "songs featured in tv shows",
+      "tv theme song classics",
+      `${decadeLabel} tv soundtrack songs`.trim()
+    );
+  } else if (genreLabel && decadeLabel) {
+    terms.push(
+      `${decadeLabel} ${genreLabel} hits`,
+      `best ${genreLabel} songs ${decadeLabel}`,
+      `${genreLabel} classics ${decadeLabel}`,
+      `${decadeLabel} ${genreLabel} anthems`,
+      `underrated ${genreLabel} songs ${decadeLabel}`
+    );
+  } else if (genreLabel) {
+    terms.push(
+      `best ${genreLabel} hits`,
+      `top ${genreLabel} songs`,
+      `${genreLabel} classics`,
+      `${genreLabel} anthems`,
+      `underrated ${genreLabel} songs`,
+      `essential ${genreLabel} tracks`
+    );
+  } else if (decadeLabel) {
+    terms.push(
+      `${decadeLabel} greatest hits`,
+      `${decadeLabel} number one songs`,
+      `${decadeLabel} classic songs`,
+      `${decadeLabel} chart toppers`,
+      `underrated songs of the ${decadeLabel}`
+    );
+  } else {
+    terms.push(
+      "today's biggest hits",
+      "greatest hits of all time",
+      "classic hit songs",
+      "songs everyone knows",
+      "chart topping anthems"
+    );
+  }
   return Array.from(new Set(terms));
 }
 
@@ -108,7 +160,9 @@ async function searchOnce(term: string, genre: string): Promise<SongResult[]> {
   // iTunes gives us to "USA songs". It scopes catalog/availability, not song
   // language or artist nationality, so it's not a perfect content filter,
   // but it does keep results to what's distributed in the US market.
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&country=US&limit=100`;
+  // limit=200 is the real ceiling iTunes Search enforces (confirmed against
+  // the live API — anything higher gets silently clamped back to 200).
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&country=US&limit=200`;
   try {
     const res = await fetch(url);
     if (!res.ok) return [];
@@ -123,10 +177,12 @@ async function searchOnce(term: string, genre: string): Promise<SongResult[]> {
   }
 }
 
-// Searches iTunes with progressively broader terms until there's a
-// reasonably sized, deduplicated pool of real songs (with working preview
-// clips) to build a game's rounds from.
-export async function searchSongs(genre: string, decade: string, minPoolSize = 30): Promise<SongResult[]> {
+// Searches iTunes across *every* search term for this genre/decade combo
+// (not stopping early the moment some pool-size floor is crossed — that
+// was the main reason the pool stayed small and repeat-prone for popular
+// combos, see buildSearchTerms above) and merges/dedupes the results into
+// one pool to build a game's rounds from.
+export async function searchSongs(genre: string, decade: string): Promise<SongResult[]> {
   const terms = buildSearchTerms(genre, decade);
   const seen = new Set<string>();
   const pool: SongResult[] = [];
@@ -138,7 +194,6 @@ export async function searchSongs(genre: string, decade: string, minPoolSize = 3
       seen.add(key);
       pool.push(hit);
     }
-    if (pool.length >= minPoolSize) break;
   }
   return pool;
 }

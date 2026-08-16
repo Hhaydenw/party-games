@@ -48,13 +48,14 @@ function pickNext(pool: SongResult[], order: number[], used: number[]): { index:
 }
 
 export type TunePhase = "guessing" | "roundEnd" | "finished";
+export type TuneField = "title" | "artist";
 
 interface GuessLogEntry {
   id: string;
   playerId: PlayerId;
+  field: TuneField;
   text: string;
   correct: boolean;
-  bothBonus: boolean;
   at: number;
 }
 
@@ -72,9 +73,22 @@ export interface NameThatTuneState {
   artworkUrl: string | null;
   phase: TunePhase;
   guesses: GuessLogEntry[];
-  correctGuessers: PlayerId[];
+  // Order of correctness matters — position determines points, same as
+  // the old single-list version did, just tracked per field now that
+  // title and artist are guessed (and scored) independently.
+  correctTitleGuessers: PlayerId[];
+  correctArtistGuessers: PlayerId[];
+  roundStartedAt: number;
   roundEndsAt: number | null;
   scores: Record<PlayerId, number>;
+}
+
+interface RevealResult {
+  playerId: PlayerId;
+  titleCorrect: boolean;
+  titleMs: number | null; // time from round start to their correct title guess
+  artistCorrect: boolean;
+  artistMs: number | null;
 }
 
 export interface NameThatTuneView {
@@ -86,14 +100,17 @@ export interface NameThatTuneView {
   revealedArtist: string | null;
   revealedArtworkUrl: string | null;
   phase: TunePhase;
-  guesses: { id: string; playerId: PlayerId; text: string | null; correct: boolean; bothBonus: boolean; at: number }[];
-  correctGuessers: PlayerId[];
-  youGuessedCorrectly: boolean;
+  guesses: { id: string; playerId: PlayerId; field: TuneField; text: string | null; correct: boolean; at: number }[];
+  yourTitleCorrect: boolean;
+  yourArtistCorrect: boolean;
+  // Who got what right and how fast — populated once revealed (roundEnd/
+  // finished), null during guessing.
+  results: RevealResult[] | null;
   roundEndsAt: number | null;
   scores: { playerId: PlayerId; score: number }[];
 }
 
-export type NameThatTuneAction = { type: "guess"; text: string } | { type: "timeUp" } | { type: "advance" };
+export type NameThatTuneAction = { type: "guess"; field: TuneField; text: string } | { type: "timeUp" } | { type: "advance" };
 
 function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice();
@@ -165,23 +182,16 @@ function normalize(s: string): string {
   return wordsToDigits(cleaned);
 }
 
-function matches(guess: string, target: string): boolean {
-  if (!guess || !target) return false;
-  if (guess === target) return true;
-  return guess.length >= 4 && target.length >= 4 && target.includes(guess);
-}
-
-// Returns whether the guess matches the title, artist, or both (for a bonus)
-// — e.g. "Bohemian Rhapsody by Queen" or "Bohemian Rhapsody - Queen".
-function scoreGuess(text: string, title: string, artist: string): { correct: boolean; bothBonus: boolean } {
+// A near-miss-tolerant match: exact after normalizing, or the target is a
+// substring of a long-enough guess (catches "queen bohemian rhapsody" or
+// minor typos/extra words without requiring an exact match).
+function fieldMatch(text: string, target: string): boolean {
   const guess = normalize(text);
-  const t = normalize(title);
-  const a = normalize(artist);
-  const titleHit = matches(guess, t) || (guess.includes(t) && t.length >= 4);
-  const artistHit = matches(guess, a) || (guess.includes(a) && a.length >= 4);
-  if (titleHit && artistHit) return { correct: true, bothBonus: true };
-  if (titleHit || artistHit) return { correct: true, bothBonus: false };
-  return { correct: false, bothBonus: false };
+  const t = normalize(target);
+  if (!guess || !t) return false;
+  if (guess === t) return true;
+  if (guess.length >= 4 && t.length >= 4 && t.includes(guess)) return true;
+  return guess.includes(t) && t.length >= 4;
 }
 
 let guessSeq = 0;
@@ -235,7 +245,9 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
       artworkUrl: first.song.artworkUrl,
       phase: "guessing",
       guesses: [],
-      correctGuessers: [],
+      correctTitleGuessers: [],
+      correctArtistGuessers: [],
+      roundStartedAt: Date.now(),
       roundEndsAt: Date.now() + ROUND_MS,
       scores,
     };
@@ -245,25 +257,35 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
 
     if (action.type === "guess") {
       if (state.phase !== "guessing") throw new GameActionError("Not accepting guesses right now.");
-      if (state.correctGuessers.includes(playerId)) throw new GameActionError("You already guessed it.");
+      const list = action.field === "title" ? state.correctTitleGuessers : state.correctArtistGuessers;
+      if (list.includes(playerId)) throw new GameActionError(`You already got the ${action.field} right.`);
       const text = action.text.trim().slice(0, 80);
       if (!text) throw new GameActionError("Guess can't be empty.");
-      const { correct, bothBonus } = scoreGuess(text, state.title, state.artist);
-      const entry: GuessLogEntry = { id: nextGuessId(), playerId, text, correct, bothBonus, at: Date.now() };
+      const target = action.field === "title" ? state.title : state.artist;
+      const correct = fieldMatch(text, target);
+      const entry: GuessLogEntry = { id: nextGuessId(), playerId, field: action.field, text, correct, at: Date.now() };
       let next: NameThatTuneState = { ...state, guesses: [...state.guesses.slice(-49), entry] };
 
       if (correct) {
-        const position = state.correctGuessers.length;
-        const basePoints = position === 0 ? 3 : position === 1 ? 2 : 1;
-        const points = basePoints + (bothBonus ? 2 : 0);
+        const position = list.length;
+        const points = position === 0 ? 3 : position === 1 ? 2 : 1;
+        const updatedList = [...list, playerId];
+        const otherList = action.field === "title" ? state.correctArtistGuessers : state.correctTitleGuessers;
+        // Getting the *second* field right (in either order) is a bonus —
+        // same spirit as the old single-guess "got both at once" bonus,
+        // just reachable across two separate guesses now that the fields
+        // are independent.
+        const completedBoth = otherList.includes(playerId);
+        const totalPoints = points + (completedBoth ? 2 : 0);
         next = {
           ...next,
-          correctGuessers: [...state.correctGuessers, playerId],
-          scores: { ...next.scores, [playerId]: (next.scores[playerId] ?? 0) + points },
+          ...(action.field === "title" ? { correctTitleGuessers: updatedList } : { correctArtistGuessers: updatedList }),
+          scores: { ...next.scores, [playerId]: (next.scores[playerId] ?? 0) + totalPoints },
         };
-        if (next.correctGuessers.length === state.playerIds.length) {
-          next = { ...next, phase: "roundEnd" };
-        }
+        const titleDone = action.field === "title" ? updatedList : state.correctTitleGuessers;
+        const artistDone = action.field === "artist" ? updatedList : state.correctArtistGuessers;
+        const everyoneDone = state.playerIds.every((pid) => titleDone.includes(pid) && artistDone.includes(pid));
+        if (everyoneDone) next = { ...next, phase: "roundEnd" };
       }
       return next;
     }
@@ -295,7 +317,9 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
         artworkUrl: next.song.artworkUrl,
         phase: "guessing",
         guesses: [],
-        correctGuessers: [],
+        correctTitleGuessers: [],
+        correctArtistGuessers: [],
+        roundStartedAt: Date.now(),
         roundEndsAt: Date.now() + ROUND_MS,
       };
     }
@@ -303,8 +327,22 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
     throw new GameActionError("Unknown action.");
   },
   getPlayerView(state, playerId) {
-    const viewerCorrect = state.correctGuessers.includes(playerId);
+    const yourTitleCorrect = state.correctTitleGuessers.includes(playerId);
+    const yourArtistCorrect = state.correctArtistGuessers.includes(playerId);
     const revealed = state.phase === "roundEnd" || state.phase === "finished";
+    const results: RevealResult[] | null = revealed
+      ? state.playerIds.map((pid) => {
+          const titleGuess = state.guesses.find((g) => g.playerId === pid && g.field === "title" && g.correct);
+          const artistGuess = state.guesses.find((g) => g.playerId === pid && g.field === "artist" && g.correct);
+          return {
+            playerId: pid,
+            titleCorrect: Boolean(titleGuess),
+            titleMs: titleGuess ? titleGuess.at - state.roundStartedAt : null,
+            artistCorrect: Boolean(artistGuess),
+            artistMs: artistGuess ? artistGuess.at - state.roundStartedAt : null,
+          };
+        })
+      : null;
     return {
       hostId: state.hostId,
       roundIndex: state.roundIndex,
@@ -314,16 +352,20 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
       revealedArtist: revealed ? state.artist : null,
       revealedArtworkUrl: revealed ? state.artworkUrl : null,
       phase: state.phase,
-      guesses: state.guesses.map((g) => ({
-        id: g.id,
-        playerId: g.playerId,
-        correct: g.correct,
-        bothBonus: g.bothBonus,
-        at: g.at,
-        text: !g.correct || g.playerId === playerId || viewerCorrect || revealed ? g.text : null,
-      })),
-      correctGuessers: state.correctGuessers,
-      youGuessedCorrectly: viewerCorrect,
+      guesses: state.guesses.map((g) => {
+        const viewerFieldCorrect = g.field === "title" ? yourTitleCorrect : yourArtistCorrect;
+        return {
+          id: g.id,
+          playerId: g.playerId,
+          field: g.field,
+          correct: g.correct,
+          at: g.at,
+          text: !g.correct || g.playerId === playerId || viewerFieldCorrect || revealed ? g.text : null,
+        };
+      }),
+      yourTitleCorrect,
+      yourArtistCorrect,
+      results,
       roundEndsAt: state.roundEndsAt,
       scores: state.playerIds.map((pid) => ({ playerId: pid, score: state.scores[pid] ?? 0 })),
     };
