@@ -209,7 +209,7 @@ export default function LuckySpinView({
             {view.revealedPhrase}
           </p>
         ) : (
-          <div className="flex flex-wrap justify-center gap-x-3 gap-y-2">
+          <div className="flex flex-wrap justify-center gap-x-6 gap-y-3">
             {view.boardWords.map((word, wi) => (
               <div key={wi} className="flex gap-1">
                 {word.map((c, ci) => (
