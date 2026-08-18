@@ -79,7 +79,15 @@ export interface NameThatTuneState {
   correctTitleGuessers: PlayerId[];
   correctArtistGuessers: PlayerId[];
   roundStartedAt: number;
+  // Starts as a fixed ROUND_MS guess (see below) and gets corrected to the
+  // clip's *real* remaining play time the moment any client's <audio>
+  // element reports its actual duration — so the countdown (and the
+  // fallback auto-end) end up matching however long this specific preview
+  // clip really is, not a one-size-fits-all guess. clipLengthSet makes
+  // that a one-time correction (first report wins) rather than every
+  // client's slightly different duration reading fighting over it.
   roundEndsAt: number | null;
+  clipLengthSet: boolean;
   scores: Record<PlayerId, number>;
 }
 
@@ -110,7 +118,11 @@ export interface NameThatTuneView {
   scores: { playerId: PlayerId; score: number }[];
 }
 
-export type NameThatTuneAction = { type: "guess"; field: TuneField; text: string } | { type: "timeUp" } | { type: "advance" };
+export type NameThatTuneAction =
+  | { type: "guess"; field: TuneField; text: string }
+  | { type: "setClipLength"; ms: number }
+  | { type: "timeUp" }
+  | { type: "advance" };
 
 function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice();
@@ -249,11 +261,23 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
       correctArtistGuessers: [],
       roundStartedAt: Date.now(),
       roundEndsAt: Date.now() + ROUND_MS,
+      clipLengthSet: false,
       scores,
     };
   },
   async applyAction(state, playerId, action) {
     if (state.phase === "finished") throw new GameActionError("Game is already over.");
+
+    if (action.type === "setClipLength") {
+      // First real reading wins; anyone still guessing can report it, not
+      // just the host — whoever's audio metadata loads first. A no-op
+      // (not an error) if the round's already moved on or already got a
+      // reading, since this fires automatically from playback, not a
+      // deliberate user action, and racing multiple reports is expected.
+      if (state.phase !== "guessing" || state.clipLengthSet) return state;
+      const ms = Math.max(3000, Math.min(action.ms, 180_000)); // sanity clamp: 3s-3min
+      return { ...state, roundEndsAt: state.roundStartedAt + ms, clipLengthSet: true };
+    }
 
     if (action.type === "guess") {
       if (state.phase !== "guessing") throw new GameActionError("Not accepting guesses right now.");
@@ -321,6 +345,7 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
         correctArtistGuessers: [],
         roundStartedAt: Date.now(),
         roundEndsAt: Date.now() + ROUND_MS,
+        clipLengthSet: false,
       };
     }
 
