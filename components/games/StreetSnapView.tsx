@@ -32,8 +32,19 @@ async function loadStreetView(apiKey: string): Promise<{ StreetViewPanorama: typ
 // is the commonly-used approximation (halving the field of view per zoom
 // level), close enough for a voting-display image that doesn't need to
 // pixel-match the interactive view exactly.
+//
+// Capped at 100 rather than the Static API's real 120 max — that's the
+// actual "fisheye" complaint: at very wide FOV, the Static API's flat
+// perspective projection visibly bulges/stretches near the edges (an
+// inherent property of rendering a wide field of view as a flat
+// rectilinear image, not a bug in this app's code, but still bad enough
+// wide to look broken). Reaching a wide fov means zooming out a lot live
+// in the panorama; the crop slider below can zoom back in on the flat
+// rendered image afterward without reintroducing any distortion, so
+// capping the *captured* fov here doesn't cost any real framing
+// flexibility.
 function zoomToFov(zoom: number): number {
-  return Math.round(Math.max(10, Math.min(120, 180 / Math.pow(2, zoom))));
+  return Math.round(Math.max(10, Math.min(100, 180 / Math.pow(2, zoom))));
 }
 
 function buildStaticStreetViewUrl(apiKey: string, camera: CameraState): string {
@@ -61,7 +72,6 @@ function buildStaticStreetViewUrl(apiKey: string, camera: CameraState): string {
 // export/store pixels to deliver real filter/crop functionality.
 const FILTER_PRESETS = [
   { id: "none", label: "Original", css: "" },
-  { id: "grayscale", label: "B&W", css: "grayscale(1)" },
   { id: "sepia", label: "Sepia", css: "sepia(0.8)" },
   { id: "vintage", label: "Vintage", css: "sepia(0.35) contrast(1.1) saturate(1.3) brightness(0.95)" },
   { id: "cool", label: "Cool", css: "hue-rotate(15deg) saturate(1.1) brightness(1.05)" },
@@ -69,49 +79,88 @@ const FILTER_PRESETS = [
   { id: "vivid", label: "Vivid", css: "saturate(1.6) contrast(1.15)" },
   { id: "noir", label: "Noir", css: "grayscale(1) contrast(1.4) brightness(0.9)" },
 ] as const;
-// Combines the chosen filter preset with the fine-tune brightness/contrast/
-// saturation adjustments into one CSS `filter` value — the preset (if any)
-// supplies a baseline look, and the sliders layer additional adjustment
-// functions on top, which is exactly how chained CSS filter functions are
-// meant to compose (each one applies to the result of the last).
-function editCss(edit: { filter?: string; brightness?: number; contrast?: number; saturation?: number }): string {
+
+type EditFields = { filter?: string; brightness?: number; contrast?: number; saturation?: number; bw?: number; blur?: number };
+
+// Combines the chosen filter preset with the fine-tune slider adjustments
+// into one CSS `filter` value — the preset (if any) supplies a baseline
+// look, and the sliders layer additional adjustment functions on top,
+// which is exactly how chained CSS filter functions are meant to compose
+// (each one applies to the result of the last). `bw` is a continuous
+// black & white *intensity* (0-100%), not a fixed on/off preset — dialing
+// it up gradually desaturates toward true grayscale.
+function editCss(edit: EditFields): string {
   const preset = FILTER_PRESETS.find((f) => f.id === edit.filter)?.css ?? "";
   const parts: string[] = [preset];
   const brightness = edit.brightness ?? 100;
   const contrast = edit.contrast ?? 100;
   const saturation = edit.saturation ?? 100;
+  const bw = edit.bw ?? 0;
+  const blur = edit.blur ?? 0;
   if (brightness !== 100) parts.push(`brightness(${brightness / 100})`);
   if (contrast !== 100) parts.push(`contrast(${contrast / 100})`);
   if (saturation !== 100) parts.push(`saturate(${saturation / 100})`);
+  if (bw > 0) parts.push(`grayscale(${bw / 100})`);
+  if (blur > 0) parts.push(`blur(${blur}px)`);
   return parts.filter(Boolean).join(" ");
 }
-function cropTransform(camera: CameraState): string {
+// Crop (pan/zoom) and tilt (rotation) composed into one transform — order
+// matters here: translate/scale first to reposition and zoom the crop
+// window, then rotate on top of that, so tilting always spins around the
+// center of the framed crop rather than the original image's center.
+function cropTransform(camera: { cropX?: number; cropY?: number; cropScale?: number; tilt?: number }): string {
   const x = camera.cropX ?? 50;
   const y = camera.cropY ?? 50;
   const scale = camera.cropScale ?? 1;
-  return `translate(${50 - x}%, ${50 - y}%) scale(${scale})`;
+  const tilt = camera.tilt ?? 0;
+  return `translate(${50 - x}%, ${50 - y}%) scale(${scale}) rotate(${tilt}deg)`;
+}
+// A vignette can't go through the `filter` property — it's an inset
+// shadow on the image's own container instead, darkening in from the
+// edges. Kept as a separate style property (not merged into editCss)
+// since it's box-shadow, not filter.
+function vignetteShadow(vignette?: number): string | undefined {
+  const v = vignette ?? 0;
+  if (v <= 0) return undefined;
+  const spread = 20 + v * 0.6;
+  const blurPx = 40 + v * 1.2;
+  return `inset 0 0 ${blurPx}px ${spread}px rgba(0,0,0,${(v / 100) * 0.85})`;
 }
 
 // A real top-level component (not declared inside ExploringPanel's render
 // body) — a lesson learned the hard way on Color Match's sliders, where a
 // per-render-redeclared component meant React tore down and rebuilt the
-// underlying <input> on every parent re-render, breaking mid-drag. min=0
-// max=200 with 100 as the unchanged midpoint mirrors how brightness/
-// contrast/saturate CSS filter functions themselves work (1.0 = 100% =
-// no change).
-function EditSlider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+// underlying <input> on every parent re-render, breaking mid-drag.
+function EditSlider({
+  label,
+  value,
+  min = 0,
+  max = 200,
+  unit = "%",
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  unit?: string;
+  onChange: (v: number) => void;
+}) {
   return (
     <label className="flex items-center gap-2 text-xs text-slate-400">
-      <span className="w-24 shrink-0 text-left">{label}</span>
+      <span className="w-20 shrink-0 text-left">{label}</span>
       <input
         type="range"
-        min={0}
-        max={200}
+        min={min}
+        max={max}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         className="flex-1 accent-accent"
       />
-      <span className="w-9 shrink-0 text-right font-mono">{value}%</span>
+      <span className="w-11 shrink-0 text-right font-mono">
+        {value}
+        {unit}
+      </span>
     </label>
   );
 }
@@ -339,26 +388,54 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   const [brightness, setBrightness] = useState(100);
   const [contrast, setContrast] = useState(100);
   const [saturation, setSaturation] = useState(100);
+  const [bw, setBw] = useState(0);
+  const [blur, setBlur] = useState(0);
+  const [tilt, setTilt] = useState(0);
+  const [vignette, setVignette] = useState(0);
   const [cropPos, setCropPos] = useState({ x: 50, y: 50 });
   const [cropScale, setCropScale] = useState(1);
   const pendingRef = useRef<CameraState | null>(null);
   pendingRef.current = pendingCamera;
-  const editRef = useRef({ filterId, brightness, contrast, saturation, cropPos, cropScale });
-  editRef.current = { filterId, brightness, contrast, saturation, cropPos, cropScale };
+  const editRef = useRef({ filterId, brightness, contrast, saturation, bw, blur, tilt, vignette, cropPos, cropScale });
+  editRef.current = { filterId, brightness, contrast, saturation, bw, blur, tilt, vignette, cropPos, cropScale };
+
+  function resetEdits() {
+    setFilterId("none");
+    setBrightness(100);
+    setContrast(100);
+    setSaturation(100);
+    setBw(0);
+    setBlur(0);
+    setTilt(0);
+    setVignette(0);
+    setCropPos({ x: 50, y: 50 });
+    setCropScale(1);
+  }
 
   function startReview() {
     if (submittedRef.current || pendingCamera) return;
     playSound("shutter");
     setPendingCamera(captureCurrentCamera());
-    setFilterId("none");
-    setBrightness(100);
-    setContrast(100);
-    setSaturation(100);
-    setCropPos({ x: 50, y: 50 });
-    setCropScale(1);
+    resetEdits();
     if (aiming) exitAiming();
   }
   function retake() {
+    // Explicitly put the live panorama back exactly where the photo was
+    // framed, rather than trusting it to have stayed there on its own —
+    // it's covered by an opaque overlay during review, not disabled, so
+    // anything that can still move it while hidden (Street View's own
+    // keyboard navigation, for one, which nothing here turns off) used to
+    // leave the live view sitting wherever it drifted to instead of back
+    // where the player actually was.
+    if (pendingCamera && panoramaRef.current) {
+      try {
+        panoramaRef.current.setPano(pendingCamera.pano);
+        panoramaRef.current.setPov({ heading: pendingCamera.heading, pitch: pendingCamera.pitch });
+        panoramaRef.current.setZoom(pendingCamera.zoom);
+      } catch {
+        // best-effort — if this throws, showing the live view as-is beats a black screen
+      }
+    }
     setPendingCamera(null);
   }
   function confirmSubmit() {
@@ -366,7 +443,7 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     playSound("select");
     onAction({
       type: "submitPhoto",
-      camera: { ...pendingCamera, filter: filterId, brightness, contrast, saturation, cropX: cropPos.x, cropY: cropPos.y, cropScale },
+      camera: { ...pendingCamera, filter: filterId, brightness, contrast, saturation, bw, blur, tilt, vignette, cropX: cropPos.x, cropY: cropPos.y, cropScale },
     });
     setPendingCamera(null);
   }
@@ -395,22 +472,40 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   // round entirely to an unlucky timeout. Uses whatever they'd staged for
   // review (with its chosen filter/crop) if they got that far, else
   // captures fresh from the live panorama with defaults.
+  //
+  // Fires *ahead* of the deadline (not after it) — this used to fire at
+  // deadline+50ms, but the round's own timeUp (which any client, usually
+  // the host, fires as soon as its clock hits zero — see useCountdown) can
+  // land anywhere in a 0-250ms window after the same deadline. Whichever
+  // one reaches the server first wins: if the host's timeUp got there
+  // first, phase had already moved past "exploring" by the time this
+  // player's own accurate submission arrived, so the server's own
+  // fallback (a plain shot of the round's starting view, for anyone still
+  // missing a photo) silently won instead — which is exactly the "random
+  // photo, not what I was framing" bug. Firing comfortably *before* the
+  // deadline instead means this player's real, current framing is
+  // guaranteed to reach the server first.
+  const AUTO_SUBMIT_LEAD_MS = 400;
   const autoSubmitted = useRef(false);
   useEffect(() => {
     autoSubmitted.current = false;
   }, [view.startPano]);
   useEffect(() => {
     if (!view.exploreEndsAt) return;
-    const msLeft = view.exploreEndsAt - serverNow();
+    const msLeft = view.exploreEndsAt - serverNow() - AUTO_SUBMIT_LEAD_MS;
     if (msLeft <= 0) return;
     const t = setTimeout(() => {
       if (submittedRef.current || autoSubmitted.current) return;
       autoSubmitted.current = true;
       const base = pendingRef.current ?? captureCurrentCamera();
-      const { filterId: f, brightness: b, contrast: c2, saturation: s2, cropPos: c, cropScale: s } = editRef.current;
-      onAction({ type: "submitPhoto", camera: { ...base, filter: f, brightness: b, contrast: c2, saturation: s2, cropX: c.x, cropY: c.y, cropScale: s } });
+      const { filterId: f, brightness: b, contrast: c2, saturation: s2, bw: bw2, blur: blur2, tilt: tilt2, vignette: vig2, cropPos: c, cropScale: s } =
+        editRef.current;
+      onAction({
+        type: "submitPhoto",
+        camera: { ...base, filter: f, brightness: b, contrast: c2, saturation: s2, bw: bw2, blur: blur2, tilt: tilt2, vignette: vig2, cropX: c.x, cropY: c.y, cropScale: s },
+      });
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, msLeft + 50);
+    }, msLeft);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.exploreEndsAt]);
@@ -505,10 +600,21 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
               draggable={false}
               className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
               style={{
-                filter: editCss({ filter: filterId, brightness, contrast, saturation }),
-                transform: `translate(${50 - cropPos.x}%, ${50 - cropPos.y}%) scale(${cropScale})`,
+                filter: editCss({ filter: filterId, brightness, contrast, saturation, bw, blur }),
+                transform: cropTransform({ cropX: cropPos.x, cropY: cropPos.y, cropScale, tilt }),
+                boxShadow: vignetteShadow(vignette),
               }}
             />
+            {/* Rule-of-thirds grid — only useful (and only shown) once
+                there's actually room to reposition, i.e. zoomed in past
+                100%, same as the "drag to reposition" hint below. */}
+            {cropScale > 1 && (
+              <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
+                {Array.from({ length: 9 }).map((_, i) => (
+                  <div key={i} className="border border-white/25" />
+                ))}
+              </div>
+            )}
           </div>
         )}
         {showSubmitted && (
@@ -520,17 +626,30 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
 
       {showReview ? (
         <>
-          <label className="flex w-full max-w-xs items-center gap-2 text-xs text-slate-400">
-            🔍
-            <input
-              type="range"
-              min={100}
-              max={220}
-              value={cropScale * 100}
-              onChange={(e) => setCropScale(Number(e.target.value) / 100)}
-              className="flex-1 accent-accent"
-            />
-          </label>
+          <div className="flex w-full max-w-xs items-center gap-2">
+            <label className="flex flex-1 items-center gap-2 text-xs text-slate-400">
+              🔍
+              <input
+                type="range"
+                min={100}
+                max={220}
+                value={cropScale * 100}
+                onChange={(e) => setCropScale(Number(e.target.value) / 100)}
+                className="flex-1 accent-accent"
+              />
+            </label>
+            {(cropScale > 1 || cropPos.x !== 50 || cropPos.y !== 50) && (
+              <button
+                className="shrink-0 text-xs text-slate-500 underline hover:text-slate-300"
+                onClick={() => {
+                  setCropScale(1);
+                  setCropPos({ x: 50, y: 50 });
+                }}
+              >
+                Reset crop
+              </button>
+            )}
+          </div>
           {cropScale > 1 && <p className="text-xs text-slate-500">Drag the photo to reposition it</p>}
           <div className="flex flex-wrap justify-center gap-1.5">
             {FILTER_PRESETS.map((f) => (
@@ -552,13 +671,21 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
             <EditSlider label="☀️ Brightness" value={brightness} onChange={setBrightness} />
             <EditSlider label="◐ Contrast" value={contrast} onChange={setContrast} />
             <EditSlider label="🎨 Saturation" value={saturation} onChange={setSaturation} />
-            {(brightness !== 100 || contrast !== 100 || saturation !== 100) && (
+            <EditSlider label="⚫ B&W" value={bw} max={100} onChange={setBw} />
+            <EditSlider label="🌫️ Focus blur" value={blur} max={8} unit="px" onChange={setBlur} />
+            <EditSlider label="📐 Tilt" value={tilt} min={-30} max={30} unit="°" onChange={setTilt} />
+            <EditSlider label="🖤 Vignette" value={vignette} max={100} onChange={setVignette} />
+            {(brightness !== 100 || contrast !== 100 || saturation !== 100 || bw !== 0 || blur !== 0 || tilt !== 0 || vignette !== 0) && (
               <button
                 className="self-center text-xs text-slate-500 underline hover:text-slate-300"
                 onClick={() => {
                   setBrightness(100);
                   setContrast(100);
                   setSaturation(100);
+                  setBw(0);
+                  setBlur(0);
+                  setTilt(0);
+                  setVignette(0);
                 }}
               >
                 Reset adjustments
@@ -695,7 +822,7 @@ function PhotoTile({
             src={buildStaticStreetViewUrl(apiKey, camera)}
             alt={`Photo by ${label}`}
             className="absolute inset-0 h-full w-full object-cover"
-            style={{ filter: editCss(camera), transform: cropTransform(camera) }}
+            style={{ filter: editCss(camera), transform: cropTransform(camera), boxShadow: vignetteShadow(camera.vignette) }}
             onLoad={() => setLoaded(true)}
           />
         )}
@@ -741,7 +868,7 @@ function PhotoLightbox({ apiKey, camera, label, onClose }: { apiKey: string; cam
             src={buildStaticStreetViewUrl(apiKey, camera)}
             alt={`Photo by ${label}`}
             className="block h-auto w-full"
-            style={{ filter: editCss(camera), transform: cropTransform(camera) }}
+            style={{ filter: editCss(camera), transform: cropTransform(camera), boxShadow: vignetteShadow(camera.vignette) }}
           />
         </div>
         <p className="mt-2 text-center text-sm text-slate-300">{label}</p>
