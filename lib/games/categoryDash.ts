@@ -179,7 +179,21 @@ function normalizeForDuplicate(text: string): string {
   return text.trim().toLowerCase().replace(/^(a|an|the)\s+/i, "").replace(/[^a-z0-9]/g, "");
 }
 
-export type CategoryDashPhase = "writing" | "reviewing" | "voting" | "roundEnd" | "finished";
+// A simple "does this answer contain a double letter" heuristic (BALLOON,
+// COFFEE, GIRAFFE) — checks for two of the same letter back-to-back
+// anywhere in the text. Non-letter characters (spaces, punctuation) are
+// collapsed to a single separator rather than removed outright, so a
+// multi-word answer doesn't falsely register a double at a word boundary
+// (stripping the space in "RED DOOR" would otherwise leave "reddoor",
+// which looks like a double "d" that was never really there). Deliberately
+// a rough heuristic, not a hand-authored dictionary — that's exactly why
+// there's a manual override next to it.
+function hasDoubleLetterAuto(text: string): boolean {
+  const letters = text.toLowerCase().replace(/[^a-z]+/g, " ");
+  return /([a-z])\1/.test(letters);
+}
+
+export type CategoryDashPhase = "ready" | "writing" | "reviewing" | "voting" | "roundEnd" | "finished";
 
 export type AnswerStatus = "empty" | "invalidLetter" | "unique" | "duplicate" | "challenged";
 
@@ -189,6 +203,15 @@ interface ScoredAnswer {
   status: AnswerStatus;
   points: number;
   challengedBy: PlayerId[];
+  // Auto-detection (does the normalized answer contain two of the same
+  // letter in a row, e.g. "BALLOON") can misfire on a multi-word phrase or
+  // an odd normalization edge case — doubleLetterManual lets the host
+  // correct it by hand instead of it just being permanently wrong for
+  // that answer.
+  hasDoubleLetter: boolean;
+  doubleLetterManual: boolean; // true if the host has overridden the auto-detected value
+  voteCount: number; // favorite-answer votes so far — live during voting, final after
+  votedBy: PlayerId[];
 }
 
 interface FavoriteVote {
@@ -202,6 +225,7 @@ export interface CategoryDashState {
   totalRounds: number;
   writeMs: number;
   roundIndex: number;
+  readyPlayers: PlayerId[]; // only meaningful during "ready"
   letter: string;
   categories: string[];
   phase: CategoryDashPhase;
@@ -209,6 +233,13 @@ export interface CategoryDashState {
   answers: Record<PlayerId, Record<string, string>> | null; // frozen once writing ends
   // category -> targetPlayerId -> set of challengers, only meaningful during "reviewing"
   challenges: Record<string, PlayerId[]>;
+  // category::targetPlayerId -> set of players who've manually flagged that
+  // answer as a duplicate of something else even though the text itself
+  // didn't auto-match — the same majority-vote pattern as challenges.
+  manualDuplicateVotes: Record<string, PlayerId[]>;
+  // category::targetPlayerId -> host-set override for the auto-detected
+  // "does this answer have a double letter" call.
+  doubleLetterOverrides: Record<string, boolean>;
   // voterId -> which specific answer they picked as their favorite —
   // only meaningful during "voting", which comes after reviewing/
   // challenges so voting only ever considers answers that survived.
@@ -229,6 +260,9 @@ export interface CategoryDashView {
   hostId: PlayerId;
   roundIndex: number;
   totalRounds: number;
+  readyCount: number; // only meaningful during "ready"
+  totalPlayersForReady: number;
+  youAreReady: boolean;
   letter: string;
   categories: string[];
   phase: CategoryDashPhase;
@@ -244,9 +278,12 @@ export interface CategoryDashView {
 }
 
 export type CategoryDashAction =
+  | { type: "ready" }
   | { type: "setAnswer"; category: string; text: string }
   | { type: "timeUp" }
   | { type: "challenge"; category: string; targetPlayerId: PlayerId }
+  | { type: "markDuplicate"; category: string; targetPlayerId: PlayerId }
+  | { type: "setDoubleLetter"; category: string; targetPlayerId: PlayerId; value: boolean }
   | { type: "voteFavorite"; category: string; targetPlayerId: PlayerId }
   | { type: "advance" };
 
@@ -277,20 +314,30 @@ function scoreRound(state: CategoryDashState): { review: CategoryReviewView[]; r
     }
 
     const scored: ScoredAnswer[] = state.playerIds.map((pid) => {
+      const key = challengeKey(category, pid);
       const text = (answers[pid]?.[category] ?? "").trim();
-      const challengedBy = state.challenges[challengeKey(category, pid)] ?? [];
-      if (!text) return { playerId: pid, text: "", status: "empty", points: 0, challengedBy };
+      const challengedBy = state.challenges[key] ?? [];
+      const voteEntries = Object.entries(state.votes).filter(([, v]) => v.category === category && v.targetPlayerId === pid);
+      const votedBy = voteEntries.map(([voterId]) => voterId);
+      const voteCount = votedBy.length;
+      const hasDoubleLetter = state.doubleLetterOverrides[key] ?? hasDoubleLetterAuto(text);
+      const doubleLetterManual = key in state.doubleLetterOverrides;
+      if (!text) return { playerId: pid, text: "", status: "empty", points: 0, challengedBy, hasDoubleLetter: false, doubleLetterManual: false, voteCount, votedBy };
       if (effectiveFirstLetter(text) !== state.letter) {
-        return { playerId: pid, text, status: "invalidLetter", points: 0, challengedBy };
+        return { playerId: pid, text, status: "invalidLetter", points: 0, challengedBy, hasDoubleLetter, doubleLetterManual, voteCount, votedBy };
       }
       const norm = normalizeForDuplicate(text);
-      const groupSize = groups.get(norm)?.length ?? 1;
+      const autoGroupSize = groups.get(norm)?.length ?? 1;
+      const manualDupBy = state.manualDuplicateVotes[key] ?? [];
+      const manualDupSucceeded = eligibleVoters > 0 && manualDupBy.length > eligibleVoters / 2;
+      const isDuplicate = autoGroupSize > 1 || manualDupSucceeded;
       const challengeSucceeded = eligibleVoters > 0 && challengedBy.length > eligibleVoters / 2;
-      if (challengeSucceeded) return { playerId: pid, text, status: "challenged", points: 0, challengedBy };
-      const points = groupSize > 1 ? 1 : 2;
-      const status: AnswerStatus = groupSize > 1 ? "duplicate" : "unique";
+      if (challengeSucceeded) return { playerId: pid, text, status: "challenged", points: 0, challengedBy, hasDoubleLetter, doubleLetterManual, voteCount, votedBy };
+      const basePoints = isDuplicate ? 1 : 2;
+      const points = hasDoubleLetter ? basePoints * 2 : basePoints;
+      const status: AnswerStatus = isDuplicate ? "duplicate" : "unique";
       roundGains[pid] = (roundGains[pid] ?? 0) + points;
-      return { playerId: pid, text, status, points, challengedBy };
+      return { playerId: pid, text, status, points, challengedBy, hasDoubleLetter, doubleLetterManual, voteCount, votedBy };
     });
 
     return { category, answers: scored };
@@ -299,21 +346,38 @@ function scoreRound(state: CategoryDashState): { review: CategoryReviewView[]; r
   return { review, roundGains };
 }
 
-function startRound(state: CategoryDashState, roundIndex: number, writeMs: number): CategoryDashState {
+// A round starts in "ready" — the letter/categories aren't picked yet, so
+// there's nothing for an early clicker to get a head start thinking about.
+// Everyone clicking Ready (or the host forcing it) is what actually reveals
+// the round and starts the write clock, via beginWriting below.
+function startRound(state: CategoryDashState, roundIndex: number): CategoryDashState {
   return {
     ...state,
     roundIndex,
-    letter: pickLetter(),
-    categories: pickCategories(CATEGORIES_PER_ROUND),
-    phase: "writing",
+    readyPlayers: [],
+    letter: "",
+    categories: [],
+    phase: "ready",
     drafts: {},
     answers: null,
     challenges: {},
+    manualDuplicateVotes: {},
+    doubleLetterOverrides: {},
     votes: {},
-    writeEndsAt: Date.now() + writeMs,
+    writeEndsAt: null,
     lastRoundGains: {},
     lastRoundMvpIds: [],
-    log: [...state.log, `Round ${roundIndex + 1} of ${state.totalRounds} begins!`].slice(-20),
+  };
+}
+
+function beginWriting(state: CategoryDashState, writeMs: number): CategoryDashState {
+  return {
+    ...state,
+    letter: pickLetter(),
+    categories: pickCategories(CATEGORIES_PER_ROUND),
+    phase: "writing",
+    writeEndsAt: Date.now() + writeMs,
+    log: [...state.log, `Round ${state.roundIndex + 1} of ${state.totalRounds} begins!`].slice(-20),
   };
 }
 
@@ -378,12 +442,15 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
       totalRounds,
       writeMs,
       roundIndex: 0,
-      letter: "A",
+      readyPlayers: [],
+      letter: "",
       categories: [],
-      phase: "writing",
+      phase: "ready",
       drafts: {},
       answers: null,
       challenges: {},
+      manualDuplicateVotes: {},
+      doubleLetterOverrides: {},
       votes: {},
       writeEndsAt: null,
       scores,
@@ -391,9 +458,19 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
       lastRoundMvpIds: [],
       log: [],
     };
-    return startRound(base, 0, writeMs);
+    return startRound(base, 0);
   },
   applyAction(state, playerId, action) {
+    if (action.type === "ready") {
+      if (state.phase !== "ready") throw new GameActionError("Not waiting to start right now.");
+      if (state.readyPlayers.includes(playerId)) return state;
+      const readyPlayers = [...state.readyPlayers, playerId];
+      if (state.playerIds.every((pid) => readyPlayers.includes(pid))) {
+        return beginWriting({ ...state, readyPlayers }, state.writeMs);
+      }
+      return { ...state, readyPlayers };
+    }
+
     if (action.type === "setAnswer") {
       if (state.phase !== "writing") throw new GameActionError("Not accepting answers right now.");
       if (!state.categories.includes(action.category)) throw new GameActionError("Unknown category.");
@@ -403,13 +480,15 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
     }
 
     if (action.type === "timeUp") {
+      // The header's "Skip round" button (SKIPPABLE_GAMES) sends this same
+      // action regardless of phase, as a host escape hatch if the game's
+      // stuck waiting on someone — e.g. a straggler never clicking Ready,
+      // everyone's done challenging but nobody's advancing, or voting is
+      // stuck on one holdout.
+      if (state.phase === "ready") return beginWriting(state, state.writeMs);
       if (state.phase === "writing") {
         return { ...state, phase: "reviewing", answers: state.drafts, writeEndsAt: null };
       }
-      // The header's "Skip round" button (SKIPPABLE_GAMES) sends this same
-      // action regardless of phase, as a host escape hatch if the game's
-      // stuck waiting on someone — e.g. everyone's done challenging but
-      // nobody's advancing, or voting is stuck on one holdout.
       if (state.phase === "voting") return finalizeVoting(state);
       throw new GameActionError("Nothing to advance.");
     }
@@ -423,6 +502,23 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
       const current = state.challenges[key] ?? [];
       const nextVotes = current.includes(playerId) ? current.filter((id) => id !== playerId) : [...current, playerId];
       return { ...state, challenges: { ...state.challenges, [key]: nextVotes } };
+    }
+
+    if (action.type === "markDuplicate") {
+      if (state.phase !== "reviewing") throw new GameActionError("Not reviewing answers right now.");
+      if (!state.categories.includes(action.category)) throw new GameActionError("Unknown category.");
+      if (!state.playerIds.includes(action.targetPlayerId)) throw new GameActionError("Unknown player.");
+      const key = challengeKey(action.category, action.targetPlayerId);
+      const current = state.manualDuplicateVotes[key] ?? [];
+      const nextVotes = current.includes(playerId) ? current.filter((id) => id !== playerId) : [...current, playerId];
+      return { ...state, manualDuplicateVotes: { ...state.manualDuplicateVotes, [key]: nextVotes } };
+    }
+
+    if (action.type === "setDoubleLetter") {
+      if (playerId !== state.hostId) throw new GameActionError("Only the host can correct the double-letter call.");
+      if (state.phase !== "reviewing" && state.phase !== "voting") throw new GameActionError("Not reviewing answers right now.");
+      const key = challengeKey(action.category, action.targetPlayerId);
+      return { ...state, doubleLetterOverrides: { ...state.doubleLetterOverrides, [key]: action.value } };
     }
 
     if (action.type === "voteFavorite") {
@@ -450,6 +546,9 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
 
     if (action.type === "advance") {
       if (playerId !== state.hostId) throw new GameActionError("Only the host can advance the game.");
+      if (state.phase === "ready") {
+        return beginWriting(state, state.writeMs);
+      }
       if (state.phase === "reviewing") {
         return { ...state, phase: "voting" };
       }
@@ -459,7 +558,7 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
       if (state.phase === "roundEnd") {
         const nextRound = state.roundIndex + 1;
         if (nextRound >= state.totalRounds) return { ...state, phase: "finished" };
-        return startRound(state, nextRound, state.writeMs);
+        return startRound(state, nextRound);
       }
       throw new GameActionError("Nothing to advance.");
     }
@@ -473,6 +572,9 @@ export const categoryDash: GameDefinition<CategoryDashState, CategoryDashView, C
       hostId: state.hostId,
       roundIndex: state.roundIndex,
       totalRounds: state.totalRounds,
+      readyCount: state.readyPlayers.length,
+      totalPlayersForReady: state.playerIds.length,
+      youAreReady: state.readyPlayers.includes(playerId),
       letter: state.letter,
       categories: state.categories,
       phase: state.phase,

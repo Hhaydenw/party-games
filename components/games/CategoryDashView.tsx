@@ -61,6 +61,43 @@ export default function CategoryDashView({
     onAction({ type: "setAnswer", category, text });
   }
 
+  if (view.phase === "ready") {
+    return (
+      <div className="flex flex-col items-center gap-6">
+        <p className="text-xs uppercase tracking-widest text-slate-500">
+          Round {view.roundIndex + 1} of {view.totalRounds}
+        </p>
+        <div className="card-surface flex flex-col items-center gap-4 rounded-3xl p-8 text-center">
+          <p className="text-lg font-bold">Get ready!</p>
+          <p className="max-w-sm text-sm text-slate-400">
+            The letter and categories won't be revealed until everyone's ready, so nobody gets a head start.
+          </p>
+          <p className="text-sm text-slate-400">
+            {view.readyCount}/{view.totalPlayersForReady} ready
+          </p>
+          {view.youAreReady ? (
+            <p className="text-sm font-semibold text-emerald-400">✓ You're ready — waiting on everyone else…</p>
+          ) : (
+            <button
+              className="btn-gold text-lg"
+              onClick={() => {
+                playSound("click");
+                onAction({ type: "ready" });
+              }}
+            >
+              I'm ready!
+            </button>
+          )}
+          {isHost && view.readyCount < view.totalPlayersForReady && (
+            <button className="text-xs text-slate-500 underline hover:text-slate-300" onClick={() => onAction({ type: "timeUp" })}>
+              Start now without waiting for everyone
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (view.phase === "writing") {
     return (
       <div className="flex flex-col items-center gap-6">
@@ -102,8 +139,9 @@ export default function CategoryDashView({
         </p>
         <p className="max-w-md text-center text-xs text-slate-500">
           Duplicates score less, wrong-letter answers score nothing automatically. Think someone's answer is bogus
-          (right letter, but doesn't actually fit)? Challenge it — if more than half the other players agree, it
-          scores zero.
+          (right letter, but doesn't actually fit)? 🚩 Challenge it. Think two different-looking answers are really
+          the same thing? 🔁 Mark it a duplicate by hand. Both need more than half the other players to agree.
+          Answers with a double letter (like BALLOON) score double — the host can correct that call if it's wrong.
         </p>
         <div className="grid w-full max-w-3xl gap-4 sm:grid-cols-2">
           {view.review.map((cat) => (
@@ -111,25 +149,52 @@ export default function CategoryDashView({
               <p className="mb-2 text-sm font-semibold text-gold">{cat.category}</p>
               <div className="flex flex-col gap-1.5">
                 {cat.answers.map((a) => (
-                  <div key={a.playerId} className="flex items-center justify-between gap-2 rounded-lg bg-black/20 px-3 py-1.5 text-sm">
-                    <span className="min-w-0 truncate">
-                      <span className="font-semibold text-slate-300">{nameFor(a.playerId)}: </span>
-                      {a.text || <span className="text-slate-600">(blank)</span>}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className={`text-xs ${STATUS_CLASS[a.status]}`}>{STATUS_LABEL[a.status]}</span>
-                      {a.playerId !== meId && a.text && (a.status === "unique" || a.status === "duplicate") && (
-                        <button
-                          className={`rounded-md px-1.5 py-0.5 text-xs transition ${
-                            a.challengedBy.includes(meId) ? "bg-accent/30 text-accent" : "text-slate-500 hover:bg-accent/20 hover:text-accent"
-                          }`}
-                          title="Challenge this answer"
-                          onClick={() => onAction({ type: "challenge", category: cat.category, targetPlayerId: a.playerId })}
-                        >
-                          🚩 {a.challengedBy.length > 0 ? a.challengedBy.length : ""}
-                        </button>
-                      )}
-                    </span>
+                  <div key={a.playerId} className="flex flex-col gap-1 rounded-lg bg-black/20 px-3 py-1.5 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="min-w-0 line-clamp-2 break-words">
+                        <span className="font-semibold text-slate-300">{nameFor(a.playerId)}: </span>
+                        {a.text || <span className="text-slate-600">(blank)</span>}
+                      </span>
+                      <span className={`shrink-0 text-xs ${STATUS_CLASS[a.status]}`}>
+                        {STATUS_LABEL[a.status]}
+                        {a.hasDoubleLetter && a.status !== "empty" && a.status !== "invalidLetter" ? " ×2" : ""}
+                      </span>
+                    </div>
+                    {a.text && a.status !== "empty" && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {a.playerId !== meId && (a.status === "unique" || a.status === "duplicate") && (
+                          <button
+                            className={`rounded-md px-1.5 py-0.5 text-xs transition ${
+                              a.challengedBy.includes(meId) ? "bg-accent/30 text-accent" : "text-slate-500 hover:bg-accent/20 hover:text-accent"
+                            }`}
+                            title="Challenge this answer — doesn't actually fit the category"
+                            onClick={() => onAction({ type: "challenge", category: cat.category, targetPlayerId: a.playerId })}
+                          >
+                            🚩 Challenge {a.challengedBy.length > 0 ? `(${a.challengedBy.length})` : ""}
+                          </button>
+                        )}
+                        {a.status === "unique" && (
+                          <button
+                            className="rounded-md px-1.5 py-0.5 text-xs text-slate-500 transition hover:bg-amber-500/20 hover:text-amber-400"
+                            title="Mark as a duplicate of another answer (different wording, same idea)"
+                            onClick={() => onAction({ type: "markDuplicate", category: cat.category, targetPlayerId: a.playerId })}
+                          >
+                            🔁 Duplicate?
+                          </button>
+                        )}
+                        {isHost && (
+                          <button
+                            className="rounded-md px-1.5 py-0.5 text-xs text-slate-500 transition hover:bg-sky-500/20 hover:text-sky-400"
+                            title={a.hasDoubleLetter ? "Turn off the double-letter bonus for this answer" : "Give this answer the double-letter bonus"}
+                            onClick={() =>
+                              onAction({ type: "setDoubleLetter", category: cat.category, targetPlayerId: a.playerId, value: !a.hasDoubleLetter })
+                            }
+                          >
+                            🔤 {a.hasDoubleLetter ? "Remove ×2" : "Mark ×2"}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -168,24 +233,32 @@ export default function CategoryDashView({
                   .map((a) => {
                     const isMyVote = view.yourVote?.category === cat.category && view.yourVote?.targetPlayerId === a.playerId;
                     return (
-                      <div key={a.playerId} className="flex items-center justify-between gap-2 rounded-lg bg-black/20 px-3 py-1.5 text-sm">
-                        <span className="min-w-0 truncate">
-                          <span className="font-semibold text-slate-300">{nameFor(a.playerId)}: </span>
-                          {a.text}
-                        </span>
-                        {a.playerId !== meId && (
-                          <button
-                            className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold transition ${
-                              isMyVote ? "bg-gold/20 text-gold" : "text-slate-500 hover:bg-gold/20 hover:text-gold"
-                            }`}
-                            title="Vote this your favorite answer"
-                            onClick={() => {
-                              playSound("select");
-                              onAction({ type: "voteFavorite", category: cat.category, targetPlayerId: a.playerId });
-                            }}
-                          >
-                            {isMyVote ? "★ Your pick" : "☆ Vote"}
-                          </button>
+                      <div key={a.playerId} className="flex flex-col gap-1 rounded-lg bg-black/20 px-3 py-1.5 text-sm">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="min-w-0 line-clamp-2 break-words">
+                            <span className="font-semibold text-slate-300">{nameFor(a.playerId)}: </span>
+                            {a.text}
+                          </span>
+                          {a.playerId !== meId && (
+                            <button
+                              className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold transition ${
+                                isMyVote ? "bg-gold/20 text-gold" : "text-slate-500 hover:bg-gold/20 hover:text-gold"
+                              }`}
+                              title="Vote this your favorite answer"
+                              onClick={() => {
+                                playSound("select");
+                                onAction({ type: "voteFavorite", category: cat.category, targetPlayerId: a.playerId });
+                              }}
+                            >
+                              {isMyVote ? "★ Your pick" : "☆ Vote"}
+                            </button>
+                          )}
+                        </div>
+                        {/* Live vote attribution — who's picked this answer so far. */}
+                        {a.votedBy.length > 0 && (
+                          <p className="truncate text-xs text-slate-500">
+                            ❤️ {a.votedBy.map(nameFor).join(", ")}
+                          </p>
                         )}
                       </div>
                     );
