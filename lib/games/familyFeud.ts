@@ -990,7 +990,7 @@ const usedPrompts = new Set<string>();
 
 let chatSeq = 0;
 
-export type FeudPhase = "faceoff" | "controlling" | "stealing" | "roundEnd" | "finished";
+export type FeudPhase = "ready" | "faceoff" | "controlling" | "stealing" | "roundEnd" | "finished";
 
 interface FeudAnswer {
   text: string;
@@ -1009,6 +1009,7 @@ interface FeudTeam {
 export interface FeudState {
   hostId: PlayerId;
   teams: Record<TeamId, FeudTeam>;
+  readyPlayers: PlayerId[]; // only meaningful during "ready"
   roundIndex: number;
   totalRounds: number;
   questionOrder: number[];
@@ -1048,6 +1049,9 @@ export interface FeudView {
   captainB: PlayerId;
   areYouCaptain: boolean;
   teams: { id: TeamId; name: string; memberIds: PlayerId[]; score: number }[];
+  readyCount: number; // only meaningful during "ready"
+  totalPlayersForReady: number;
+  youAreReady: boolean;
   roundIndex: number;
   totalRounds: number;
   prompt: string;
@@ -1067,6 +1071,7 @@ export interface FeudView {
 }
 
 export type FeudAction =
+  | { type: "ready" }
   | { type: "buzz" }
   | { type: "faceoffAnswer"; text: string }
   | { type: "guess"; text: string }
@@ -1143,8 +1148,83 @@ function findMatch(text: string, answers: FeudAnswer[]): number | null {
   return null;
 }
 
+// The Levenshtein/substring matcher above catches typos and near-homophones
+// but not genuine paraphrases ("costs too much" vs. the board's "too
+// expensive") — that needs actual language understanding, not edit
+// distance. When the fast matcher above finds nothing, this asks Gemini
+// whether the guess is a reasonable real-world equivalent of any still-
+// hidden answer, as a second pass rather than a replacement — the free/
+// fast heuristic still handles the overwhelming majority of guesses
+// (typos, exact hits) without ever making a network call.
+const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_TIMEOUT_MS = 4000;
+
+async function aiMatch(text: string, answers: FeudAnswer[]): Promise<number | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  const guess = text.trim();
+  if (!guess) return null;
+  const unrevealed = answers.map((a, i) => ({ i, text: a.text })).filter(({ i }) => !answers[i]!.revealed);
+  if (unrevealed.length === 0) return null;
+
+  const list = unrevealed.map(({ i, text: t }) => `${i}: ${t}`).join("\n");
+  const prompt = `You are judging a Family Feud round. A player guessed: "${guess}"
+
+Here are the survey board's remaining hidden answers, each with its index:
+${list}
+
+Does the player's guess mean essentially the same real-world thing as ONE of these answers — allowing for paraphrases, synonyms, or a more/less specific way of saying it (not just typos, those are already handled separately)? If yes, reply with ONLY that answer's index number and nothing else. If it doesn't genuinely match any of them, reply with ONLY the word NONE.`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 10 },
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+    const idx = parseInt(raw.match(/-?\d+/)?.[0] ?? "", 10);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= answers.length) return null;
+    if (answers[idx]!.revealed) return null;
+    return idx;
+  } catch {
+    // Network failure, timeout, bad key, malformed response — the round
+    // just falls back to "not on the board" rather than the game breaking.
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Fast path first (free, instant, catches typos/exact hits), then Gemini as
+// a fallback for genuine paraphrases the fast path can't reason about.
+async function resolveMatch(text: string, answers: FeudAnswer[]): Promise<number | null> {
+  const fast = findMatch(text, answers);
+  if (fast !== null) return fast;
+  return aiMatch(text, answers);
+}
+
 function captainOf(team: FeudTeam, roundIndex: number): PlayerId {
   return team.memberIds[roundIndex % team.memberIds.length]!;
+}
+
+// Taking control after a face-off starts guessing with the *next* member
+// after whoever buzzed and answered, not the buzzer again — that buzzer
+// already got their guess (the face-off answer itself), so the team
+// immediately rotates to someone else rather than the same person going
+// twice in a row.
+function nextControllingIndex(team: FeudTeam, afterPlayerId: PlayerId): number {
+  const i = team.memberIds.indexOf(afterPlayerId);
+  return (i === -1 ? 0 : i) + 1;
 }
 
 function startRound(state: FeudState, roundIndex: number): FeudState {
@@ -1228,12 +1308,13 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
     const base: FeudState = {
       hostId: host.id,
       teams: { A: teamA, B: teamB },
+      readyPlayers: [],
       roundIndex: 0,
       totalRounds: questionOrder.length,
       questionOrder,
       prompt: "",
       answers: [],
-      phase: "faceoff",
+      phase: "ready",
       faceoffBuzzedTeam: null,
       faceoffFirstTeam: null,
       faceoffAttempted: [],
@@ -1247,10 +1328,24 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
       guessDeadline: null,
       teamChats: { A: [], B: [] },
     };
-    return startRound(base, 0);
+    return base;
   },
-  applyAction(state, playerId, action) {
+  async applyAction(state, playerId, action) {
     if (state.phase === "finished") throw new GameActionError("Game is already over.");
+
+    if (action.type === "ready") {
+      if (state.phase !== "ready") throw new GameActionError("Already past the ready-up screen.");
+      if (![...state.teams.A.memberIds, ...state.teams.B.memberIds].includes(playerId)) {
+        throw new GameActionError("You're not on a team in this game.");
+      }
+      if (state.readyPlayers.includes(playerId)) return state;
+      const readyPlayers = [...state.readyPlayers, playerId];
+      const everyone = [...state.teams.A.memberIds, ...state.teams.B.memberIds];
+      if (everyone.every((id) => readyPlayers.includes(id))) {
+        return startRound({ ...state, readyPlayers }, 0);
+      }
+      return { ...state, readyPlayers };
+    }
 
     if (action.type === "teamChat") {
       const team: TeamId | null = state.teams.A.memberIds.includes(playerId) ? "A" : state.teams.B.memberIds.includes(playerId) ? "B" : null;
@@ -1295,7 +1390,7 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
       if (!isTimeUp && !text) throw new GameActionError("Answer can't be empty.");
 
       const attempted = [...state.faceoffAttempted, actingTeam];
-      const idx = findMatch(text, state.answers);
+      const idx = await resolveMatch(text, state.answers);
       const log = isTimeUp
         ? [...state.roundLog, `${state.teams[actingTeam].name} ran out of time!`]
         : [...state.roundLog, `${state.teams[actingTeam].name} answered "${text}".`];
@@ -1309,7 +1404,7 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
           faceoffAttempted: attempted,
           phase: "controlling",
           controllingTeam: actingTeam,
-          controllingIndex: 0,
+          controllingIndex: nextControllingIndex(state.teams[actingTeam], captainOf(state.teams[actingTeam], state.roundIndex)),
           pot: answers[idx]!.points,
           guessDeadline: Date.now() + GUESS_MS,
           roundLog: [...log, `On the board! ${state.teams[actingTeam].name} takes control.`],
@@ -1335,7 +1430,7 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
         faceoffAttempted: attempted,
         phase: "controlling",
         controllingTeam: winner,
-        controllingIndex: 0,
+        controllingIndex: nextControllingIndex(state.teams[winner], captainOf(state.teams[winner], state.roundIndex)),
         pot: 0,
         guessDeadline: Date.now() + GUESS_MS,
         roundLog: [...log, `Both teams missed. ${state.teams[winner].name} takes control.`],
@@ -1353,7 +1448,7 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
       }
       const text = isTimeUp ? "" : (action as { text: string }).text.trim().slice(0, 60);
       if (!isTimeUp && !text) throw new GameActionError("Guess can't be empty.");
-      const idx = findMatch(text, state.answers);
+      const idx = await resolveMatch(text, state.answers);
       const controllingIndex = state.controllingIndex + 1;
       const actingTeam = state.controllingTeam!;
 
@@ -1386,7 +1481,7 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
       if (!isTimeUp && yourTeam !== state.stealingTeam) throw new GameActionError("Only the stealing team can guess.");
       const text = isTimeUp ? "" : (action as { text: string }).text.trim().slice(0, 60);
       if (!isTimeUp && !text) throw new GameActionError("Guess can't be empty.");
-      const idx = findMatch(text, state.answers);
+      const idx = await resolveMatch(text, state.answers);
       if (idx !== null) {
         const answers = state.answers.slice();
         answers[idx] = { ...answers[idx]!, revealed: true };
@@ -1404,9 +1499,13 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
     }
 
     if (action.type === "timeUp") {
-      // No active timer to expire (e.g. still waiting for a buzz) — a no-op
-      // rather than an error, since the client's timer effect can't always
-      // perfectly know when a deadline it fired for is already stale.
+      // The header's "Skip round" button sends this same action regardless
+      // of phase, as a host escape hatch — including force-starting past a
+      // stuck ready-up screen (e.g. a straggler never clicking Ready).
+      if (state.phase === "ready") return startRound(state, 0);
+      // No other active timer to expire (e.g. still waiting for a buzz) —
+      // a no-op rather than an error, since the client's timer effect can't
+      // always perfectly know when a deadline it fired for is already stale.
       return state;
     }
 
@@ -1437,6 +1536,9 @@ export const familyFeud: GameDefinition<FeudState, FeudView, FeudAction> = {
       captainB,
       areYouCaptain,
       teams: (["A", "B"] as TeamId[]).map((id) => ({ id, name: state.teams[id].name, memberIds: state.teams[id].memberIds, score: state.teams[id].score })),
+      readyCount: state.readyPlayers.length,
+      totalPlayersForReady: state.teams.A.memberIds.length + state.teams.B.memberIds.length,
+      youAreReady: state.readyPlayers.includes(playerId),
       roundIndex: state.roundIndex,
       totalRounds: state.totalRounds,
       prompt: state.prompt,

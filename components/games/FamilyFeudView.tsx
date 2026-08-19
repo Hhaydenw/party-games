@@ -112,6 +112,40 @@ export default function FamilyFeudView({
   // firing timeUp once it lapses (same pattern as Trivia/Name That Tune).
   const remainingMs = useCountdown(view.guessDeadline, isHost, () => onAction({ type: "timeUp" }));
 
+  if (view.phase === "ready") {
+    return (
+      <div className="flex flex-col items-center gap-6 py-10">
+        <div className="flex flex-wrap items-stretch justify-center gap-4">
+          {view.teams.map((t) => {
+            const style = TEAM_STYLE[t.id]!;
+            return (
+              <div key={t.id} className={`min-w-[140px] rounded-t-xl px-5 py-3 text-center ring-2 ${style.bg} ${style.ring}`}>
+                <p className={`text-xs font-black uppercase tracking-widest ${style.text}`}>{t.name}</p>
+                <p className="text-[11px] text-slate-400">{t.memberIds.map(nameFor).join(", ")}</p>
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-lg font-bold">Ready to survey the family?</p>
+        <p className="text-sm text-slate-400">
+          {view.readyCount}/{view.totalPlayersForReady} players ready
+        </p>
+        {view.youAreReady ? (
+          <p className="text-sm text-emerald-400">✓ You're ready — waiting on everyone else…</p>
+        ) : (
+          <button className="btn-gold text-lg" onClick={() => onAction({ type: "ready" })}>
+            I'm ready!
+          </button>
+        )}
+        {isHost && (
+          <button className="text-xs text-slate-500 underline hover:text-slate-300" onClick={() => onAction({ type: "timeUp" })}>
+            Force start (skip waiting on stragglers)
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="grid w-full gap-5 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
     <div className="flex flex-col gap-5">
