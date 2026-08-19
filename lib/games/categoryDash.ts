@@ -179,18 +179,16 @@ function normalizeForDuplicate(text: string): string {
   return text.trim().toLowerCase().replace(/^(a|an|the)\s+/i, "").replace(/[^a-z0-9]/g, "");
 }
 
-// A simple "does this answer contain a double letter" heuristic (BALLOON,
-// COFFEE, GIRAFFE) — checks for two of the same letter back-to-back
-// anywhere in the text. Non-letter characters (spaces, punctuation) are
-// collapsed to a single separator rather than removed outright, so a
-// multi-word answer doesn't falsely register a double at a word boundary
-// (stripping the space in "RED DOOR" would otherwise leave "reddoor",
-// which looks like a double "d" that was never really there). Deliberately
-// a rough heuristic, not a hand-authored dictionary — that's exactly why
-// there's a manual override next to it.
+// The "double letter" bonus is really alliteration: two (or more) separate
+// words in the answer starting with the same letter, like "Boom Bap" or
+// "Daffy Duck". Split on whitespace/punctuation, take each word's first
+// letter, and check for any repeat. Deliberately a rough heuristic, not a
+// hand-authored dictionary — that's exactly why there's a manual override
+// next to it.
 function hasDoubleLetterAuto(text: string): boolean {
-  const letters = text.toLowerCase().replace(/[^a-z]+/g, " ");
-  return /([a-z])\1/.test(letters);
+  const words = text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  const firstLetters = words.map((w) => w[0]);
+  return new Set(firstLetters).size < firstLetters.length && firstLetters.length > 1;
 }
 
 export type CategoryDashPhase = "ready" | "writing" | "reviewing" | "voting" | "roundEnd" | "finished";
@@ -212,6 +210,10 @@ interface ScoredAnswer {
   doubleLetterManual: boolean; // true if the host has overridden the auto-detected value
   voteCount: number; // favorite-answer votes so far — live during voting, final after
   votedBy: PlayerId[];
+  // Who has manually flagged this answer as a duplicate — shown/highlighted
+  // the same way challengedBy is, and kept visible even once the majority
+  // is reached so a vote can still be retracted (un-marked).
+  duplicateMarkedBy: PlayerId[];
 }
 
 interface FavoriteVote {
@@ -322,22 +324,26 @@ function scoreRound(state: CategoryDashState): { review: CategoryReviewView[]; r
       const voteCount = votedBy.length;
       const hasDoubleLetter = state.doubleLetterOverrides[key] ?? hasDoubleLetterAuto(text);
       const doubleLetterManual = key in state.doubleLetterOverrides;
-      if (!text) return { playerId: pid, text: "", status: "empty", points: 0, challengedBy, hasDoubleLetter: false, doubleLetterManual: false, voteCount, votedBy };
+      const manualDupBy = state.manualDuplicateVotes[key] ?? [];
+      if (!text) {
+        return { playerId: pid, text: "", status: "empty", points: 0, challengedBy, hasDoubleLetter: false, doubleLetterManual: false, voteCount, votedBy, duplicateMarkedBy: manualDupBy };
+      }
       if (effectiveFirstLetter(text) !== state.letter) {
-        return { playerId: pid, text, status: "invalidLetter", points: 0, challengedBy, hasDoubleLetter, doubleLetterManual, voteCount, votedBy };
+        return { playerId: pid, text, status: "invalidLetter", points: 0, challengedBy, hasDoubleLetter, doubleLetterManual, voteCount, votedBy, duplicateMarkedBy: manualDupBy };
       }
       const norm = normalizeForDuplicate(text);
       const autoGroupSize = groups.get(norm)?.length ?? 1;
-      const manualDupBy = state.manualDuplicateVotes[key] ?? [];
       const manualDupSucceeded = eligibleVoters > 0 && manualDupBy.length > eligibleVoters / 2;
       const isDuplicate = autoGroupSize > 1 || manualDupSucceeded;
       const challengeSucceeded = eligibleVoters > 0 && challengedBy.length > eligibleVoters / 2;
-      if (challengeSucceeded) return { playerId: pid, text, status: "challenged", points: 0, challengedBy, hasDoubleLetter, doubleLetterManual, voteCount, votedBy };
+      if (challengeSucceeded) {
+        return { playerId: pid, text, status: "challenged", points: 0, challengedBy, hasDoubleLetter, doubleLetterManual, voteCount, votedBy, duplicateMarkedBy: manualDupBy };
+      }
       const basePoints = isDuplicate ? 1 : 2;
       const points = hasDoubleLetter ? basePoints * 2 : basePoints;
       const status: AnswerStatus = isDuplicate ? "duplicate" : "unique";
       roundGains[pid] = (roundGains[pid] ?? 0) + points;
-      return { playerId: pid, text, status, points, challengedBy, hasDoubleLetter, doubleLetterManual, voteCount, votedBy };
+      return { playerId: pid, text, status, points, challengedBy, hasDoubleLetter, doubleLetterManual, voteCount, votedBy, duplicateMarkedBy: manualDupBy };
     });
 
     return { category, answers: scored };

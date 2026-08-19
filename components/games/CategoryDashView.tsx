@@ -140,8 +140,9 @@ export default function CategoryDashView({
         <p className="max-w-md text-center text-xs text-slate-500">
           Duplicates score less, wrong-letter answers score nothing automatically. Think someone's answer is bogus
           (right letter, but doesn't actually fit)? 🚩 Challenge it. Think two different-looking answers are really
-          the same thing? 🔁 Mark it a duplicate by hand. Both need more than half the other players to agree.
-          Answers with a double letter (like BALLOON) score double — the host can correct that call if it's wrong.
+          the same thing? 🔁 Mark it a duplicate by hand. Both need more than half the other players to agree, and
+          you can click either button again to take back your vote. Alliterative answers (like "Boom Bap" or "Daffy
+          Duck") score double — the host can correct that call if it's wrong.
         </p>
         <div className="grid w-full max-w-3xl gap-4 sm:grid-cols-2">
           {view.review.map((cat) => (
@@ -160,26 +161,38 @@ export default function CategoryDashView({
                         {a.hasDoubleLetter && a.status !== "empty" && a.status !== "invalidLetter" ? " ×2" : ""}
                       </span>
                     </div>
-                    {a.text && a.status !== "empty" && (
+                    {a.text && a.status !== "empty" && a.status !== "invalidLetter" && (
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {a.playerId !== meId && (a.status === "unique" || a.status === "duplicate") && (
+                        {a.playerId !== meId && (
                           <button
                             className={`rounded-md px-1.5 py-0.5 text-xs transition ${
                               a.challengedBy.includes(meId) ? "bg-accent/30 text-accent" : "text-slate-500 hover:bg-accent/20 hover:text-accent"
                             }`}
-                            title="Challenge this answer — doesn't actually fit the category"
+                            title={
+                              a.challengedBy.includes(meId)
+                                ? "Click to un-challenge this answer"
+                                : "Challenge this answer — doesn't actually fit the category"
+                            }
                             onClick={() => onAction({ type: "challenge", category: cat.category, targetPlayerId: a.playerId })}
                           >
-                            🚩 Challenge {a.challengedBy.length > 0 ? `(${a.challengedBy.length})` : ""}
+                            🚩 {a.status === "challenged" ? "Challenged" : "Challenge"} {a.challengedBy.length > 0 ? `(${a.challengedBy.length})` : ""}
                           </button>
                         )}
-                        {a.status === "unique" && (
+                        {a.playerId !== meId && (
                           <button
-                            className="rounded-md px-1.5 py-0.5 text-xs text-slate-500 transition hover:bg-amber-500/20 hover:text-amber-400"
-                            title="Mark as a duplicate of another answer (different wording, same idea)"
+                            className={`rounded-md px-1.5 py-0.5 text-xs transition ${
+                              a.duplicateMarkedBy.includes(meId)
+                                ? "bg-amber-500/30 text-amber-400"
+                                : "text-slate-500 hover:bg-amber-500/20 hover:text-amber-400"
+                            }`}
+                            title={
+                              a.duplicateMarkedBy.includes(meId)
+                                ? "Click to un-mark this as a duplicate"
+                                : "Mark as a duplicate of another answer (different wording, same idea)"
+                            }
                             onClick={() => onAction({ type: "markDuplicate", category: cat.category, targetPlayerId: a.playerId })}
                           >
-                            🔁 Duplicate?
+                            🔁 Duplicate? {a.duplicateMarkedBy.length > 0 ? `(${a.duplicateMarkedBy.length})` : ""}
                           </button>
                         )}
                         {isHost && (
