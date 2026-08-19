@@ -122,7 +122,8 @@ export default function DrawingView({
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2 text-center">
         <p className="text-sm text-slate-400">
-          Round {view.roundIndex + 1} of {view.totalRounds} · {nameFor(view.drawerId)} is drawing
+          Round {view.roundIndex + 1} of {view.totalRounds} · turn {view.turnInRound} of {view.playersPerRound} ·{" "}
+          {nameFor(view.drawerId)} is drawing
         </p>
         {remainingMs !== null && view.phase === "drawing" && (
           <p className="text-sm font-semibold text-gold">{Math.ceil(remainingMs / 1000)}s</p>
