@@ -72,6 +72,7 @@ function buildStaticStreetViewUrl(apiKey: string, camera: CameraState): string {
 // export/store pixels to deliver real filter/crop functionality.
 const FILTER_PRESETS = [
   { id: "none", label: "Original", css: "" },
+  { id: "blackwhite", label: "Black & White", css: "grayscale(1)" },
   { id: "sepia", label: "Sepia", css: "sepia(0.8)" },
   { id: "vintage", label: "Vintage", css: "sepia(0.35) contrast(1.1) saturate(1.3) brightness(0.95)" },
   { id: "cool", label: "Cool", css: "hue-rotate(15deg) saturate(1.1) brightness(1.05)" },
@@ -85,7 +86,6 @@ type EditFields = {
   brightness?: number;
   contrast?: number;
   saturation?: number;
-  bwCurveOn?: boolean;
   curveLow?: number;
   curveHigh?: number;
   blur?: number;
@@ -125,16 +125,20 @@ function cropTransform(camera: { cropX?: number; cropY?: number; cropScale?: num
   const tilt = camera.tilt ?? 0;
   return `translate(${50 - x}%, ${50 - y}%) scale(${scale}) rotate(${tilt}deg)`;
 }
-// A vignette can't go through the `filter` property — it's an inset
-// shadow on the image's own container instead, darkening in from the
-// edges. Kept as a separate style property (not merged into baseEditCss)
-// since it's box-shadow, not filter.
-function vignetteShadow(vignette?: number): string | undefined {
+// A vignette can't go through the `filter` property, and — the actual bug
+// here — box-shadow (including `inset`) doesn't work as an `<img>`'s own
+// inline style either: box-shadow paints as part of a box's background/
+// border layer, which is BEHIND a replaced element's own raster content, so
+// an inset shadow set directly on an <img> is silently invisible no matter
+// its opacity. Fixed by rendering the vignette as its own layered-on-top
+// <div> (see EditedPhoto) with a radial-gradient background instead of a
+// box-shadow — a sibling painted after the <img> in the same stacking
+// context always renders above it.
+function vignetteGradient(vignette?: number): string | undefined {
   const v = vignette ?? 0;
   if (v <= 0) return undefined;
-  const spread = 20 + v * 0.6;
-  const blurPx = 40 + v * 1.2;
-  return `inset 0 0 ${blurPx}px ${spread}px rgba(0,0,0,${(v / 100) * 0.85})`;
+  const innerStop = Math.max(15, 62 - v * 0.35);
+  return `radial-gradient(ellipse at center, transparent ${innerStop}%, rgba(0,0,0,${(v / 100) * 0.85}) 100%)`;
 }
 
 // A real tone curve — 4 control points (fixed black/white endpoints at
@@ -173,30 +177,26 @@ function curveTableValues(low: number, high: number, steps = 16): string {
 // referenced from the actual <img> via `filter: url(#id) ...` alongside
 // the plain CSS filter functions from baseEditCss (SVG filter references
 // and CSS filter functions chain together fine in one `filter` value).
-// Two things live in it:
-//  - A mild sharpen convolution, always present. The Static API caps
-//    images at 640x640 regardless of how large they're actually displayed
-//    (see buildStaticStreetViewUrl) — upscaled past that on any
-//    higher-DPI/Retina screen (trivially easy), it looks soft. This
-//    counteracts that.
-//  - The B&W tone curve (desaturate via feColorMatrix, then remap via
-//    feComponentTransfer), only when bwCurveOn is set.
-function SnapSvgFilters({ id, bwCurveOn, curveLow, curveHigh }: { id: string; bwCurveOn?: boolean; curveLow?: number; curveHigh?: number }) {
+// Two things live in it, always:
+//  - The tone curve (feComponentTransfer, per-channel), reshaping whatever
+//    colors/grays are already there — see EditedPhoto for why it's placed
+//    last in the filter chain, after the "Black & White" preset (if any)
+//    has already run. Defaults to an identity mapping when untouched.
+//  - A mild sharpen convolution. The Static API caps images at 640x640
+//    regardless of how large they're actually displayed (see
+//    buildStaticStreetViewUrl) — upscaled past that on any higher-DPI/
+//    Retina screen (trivially easy), it looks soft. This counteracts that.
+function SnapSvgFilters({ id, curveLow, curveHigh }: { id: string; curveLow?: number; curveHigh?: number }) {
   const table = curveTableValues(curveLow ?? 85, curveHigh ?? 170);
   return (
     <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
       <defs>
         <filter id={id} colorInterpolationFilters="sRGB">
-          {bwCurveOn && (
-            <>
-              <feColorMatrix type="matrix" values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0" />
-              <feComponentTransfer>
-                <feFuncR type="table" tableValues={table} />
-                <feFuncG type="table" tableValues={table} />
-                <feFuncB type="table" tableValues={table} />
-              </feComponentTransfer>
-            </>
-          )}
+          <feComponentTransfer>
+            <feFuncR type="table" tableValues={table} />
+            <feFuncG type="table" tableValues={table} />
+            <feFuncB type="table" tableValues={table} />
+          </feComponentTransfer>
           <feConvolveMatrix order={3} kernelMatrix="0 -1 0 -1 5 -1 0 -1 0" divisor={1} preserveAlpha="true" />
         </filter>
       </defs>
@@ -218,19 +218,25 @@ function EditedPhoto({ src, alt, camera, imgClassName, onLoad }: { src: string; 
   const rawId = useId();
   const filterId = `ssfx-${rawId.replace(/[^a-zA-Z0-9]/g, "")}`;
   const transform = cropTransform(camera);
-  const boxShadow = vignetteShadow(camera.vignette);
+  const vignetteBg = vignetteGradient(camera.vignette);
   const base = baseEditCss(camera);
   const curveUrl = `url(#${filterId})`;
   const blurAmt = camera.blur ?? 0;
   const focusX = camera.focusX ?? 50;
   const focusY = camera.focusY ?? 50;
-  const sharpFilter = [curveUrl, base].filter(Boolean).join(" ");
+  // `base` (filter preset — including "Black & White" — plus brightness/
+  // contrast/saturation) runs FIRST, then the curve runs LAST: it's meant
+  // to reshape whatever's already on screen at that point, same as a
+  // Curves adjustment sitting at the top of the stack in a real photo
+  // editor, which is what actually makes it "adjust black and white if
+  // black and white is selected" rather than fighting with it.
+  const sharpFilter = [base, curveUrl].filter(Boolean).join(" ");
 
   return (
     <>
-      <SnapSvgFilters id={filterId} bwCurveOn={camera.bwCurveOn} curveLow={camera.curveLow} curveHigh={camera.curveHigh} />
+      <SnapSvgFilters id={filterId} curveLow={camera.curveLow} curveHigh={camera.curveHigh} />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={alt} draggable={false} className={imgClassName} style={{ filter: sharpFilter, transform, boxShadow }} onLoad={onLoad} />
+      <img src={src} alt={alt} draggable={false} className={imgClassName} style={{ filter: sharpFilter, transform }} onLoad={onLoad} />
       {blurAmt > 0 && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -239,13 +245,17 @@ function EditedPhoto({ src, alt, camera, imgClassName, onLoad }: { src: string; 
           draggable={false}
           className={imgClassName}
           style={{
-            filter: [curveUrl, base, `blur(${blurAmt}px)`].filter(Boolean).join(" "),
+            filter: [base, curveUrl, `blur(${blurAmt}px)`].filter(Boolean).join(" "),
             transform,
-            boxShadow,
             WebkitMaskImage: `radial-gradient(circle at ${focusX}% ${focusY}%, transparent 0%, transparent 12%, black 42%, black 100%)`,
             maskImage: `radial-gradient(circle at ${focusX}% ${focusY}%, transparent 0%, transparent 12%, black 42%, black 100%)`,
           }}
         />
+      )}
+      {/* Layered on top as its own element, not an <img>'s box-shadow — see
+          vignetteGradient's comment for why that doesn't render. */}
+      {vignetteBg && (
+        <div className={imgClassName} style={{ backgroundImage: vignetteBg, transform, pointerEvents: "none" }} />
       )}
     </>
   );
@@ -592,7 +602,6 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   const [brightness, setBrightness] = useState(100);
   const [contrast, setContrast] = useState(100);
   const [saturation, setSaturation] = useState(100);
-  const [bwCurveOn, setBwCurveOn] = useState(false);
   const [curveLow, setCurveLow] = useState(85);
   const [curveHigh, setCurveHigh] = useState(170);
   const [blur, setBlur] = useState(0);
@@ -608,7 +617,6 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     brightness,
     contrast,
     saturation,
-    bwCurveOn,
     curveLow,
     curveHigh,
     blur,
@@ -618,14 +626,13 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     cropPos,
     cropScale,
   });
-  editRef.current = { filterId, brightness, contrast, saturation, bwCurveOn, curveLow, curveHigh, blur, focusPos, tilt, vignette, cropPos, cropScale };
+  editRef.current = { filterId, brightness, contrast, saturation, curveLow, curveHigh, blur, focusPos, tilt, vignette, cropPos, cropScale };
 
   function resetEdits() {
     setFilterId("none");
     setBrightness(100);
     setContrast(100);
     setSaturation(100);
-    setBwCurveOn(false);
     setCurveLow(85);
     setCurveHigh(170);
     setBlur(0);
@@ -673,7 +680,6 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         brightness,
         contrast,
         saturation,
-        bwCurveOn,
         curveLow,
         curveHigh,
         blur,
@@ -748,7 +754,6 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
           brightness: e.brightness,
           contrast: e.contrast,
           saturation: e.saturation,
-          bwCurveOn: e.bwCurveOn,
           curveLow: e.curveLow,
           curveHigh: e.curveHigh,
           blur: e.blur,
@@ -863,7 +868,7 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
             <EditedPhoto
               src={buildStaticStreetViewUrl(view.mapsApiKey, pendingCamera)}
               alt="Your photo"
-              camera={{ filter: filterId, brightness, contrast, saturation, bwCurveOn, curveLow, curveHigh, blur, focusX: focusPos.x, focusY: focusPos.y, cropX: cropPos.x, cropY: cropPos.y, cropScale, tilt, vignette }}
+              camera={{ filter: filterId, brightness, contrast, saturation, curveLow, curveHigh, blur, focusX: focusPos.x, focusY: focusPos.y, cropX: cropPos.x, cropY: cropPos.y, cropScale, tilt, vignette }}
               imgClassName="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
             />
             {/* Rule-of-thirds grid — only useful (and only shown) once
@@ -945,25 +950,27 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
             )}
             <EditSlider label="📐 Tilt" value={tilt} min={-30} max={30} unit="°" resetTo={0} onChange={setTilt} />
             <EditSlider label="🖤 Vignette" value={vignette} max={100} resetTo={0} onChange={setVignette} />
+            {/* A general color curve, not tied to any one filter — pick
+                "Black & White" above and this curve shapes its tones;
+                leave a color preset selected and it shapes those instead. */}
             <div className="flex flex-col items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 p-2">
-              <button
-                onClick={() => setBwCurveOn((on) => !on)}
-                className={`w-full rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  bwCurveOn ? "bg-gold text-ink" : "bg-white/10 text-slate-300 hover:bg-white/20"
-                }`}
-              >
-                ⚫ Black &amp; white curve {bwCurveOn ? "on" : "off"}
-              </button>
-              {bwCurveOn && <CurveEditor low={curveLow} high={curveHigh} onChange={(lo, hi) => { setCurveLow(lo); setCurveHigh(hi); }} />}
+              <p className="text-xs font-semibold text-slate-300">🎨 Color curve</p>
+              <CurveEditor low={curveLow} high={curveHigh} onChange={(lo, hi) => { setCurveLow(lo); setCurveHigh(hi); }} />
             </div>
-            {(brightness !== 100 || contrast !== 100 || saturation !== 100 || bwCurveOn || blur !== 0 || tilt !== 0 || vignette !== 0) && (
+            {(brightness !== 100 ||
+              contrast !== 100 ||
+              saturation !== 100 ||
+              curveLow !== 85 ||
+              curveHigh !== 170 ||
+              blur !== 0 ||
+              tilt !== 0 ||
+              vignette !== 0) && (
               <button
                 className="self-center text-xs text-slate-500 underline hover:text-slate-300"
                 onClick={() => {
                   setBrightness(100);
                   setContrast(100);
                   setSaturation(100);
-                  setBwCurveOn(false);
                   setCurveLow(85);
                   setCurveHigh(170);
                   setBlur(0);
