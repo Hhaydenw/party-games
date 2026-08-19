@@ -48,8 +48,16 @@ export interface CameraState {
   brightness?: number; // 0-200, 100 = unchanged
   contrast?: number; // 0-200, 100 = unchanged
   saturation?: number; // 0-200, 100 = unchanged
-  bw?: number; // 0-100 — continuous black & white intensity, independent of the filter preset
+  // Black & white via a real tone curve (2 draggable midtone points,
+  // Photoshop-Curves-style) instead of a flat intensity slider — off
+  // entirely unless bwCurveOn is set, so a default/identity curve doesn't
+  // silently desaturate anything.
+  bwCurveOn?: boolean;
+  curveLow?: number; // 0-255, output at input=85, default 85 (identity)
+  curveHigh?: number; // 0-255, output at input=170, default 170 (identity)
   blur?: number; // 0-8 (px) — soft-focus blur
+  focusX?: number; // 0-100 — where the blur leaves things in focus (only matters if blur > 0)
+  focusY?: number; // 0-100
   tilt?: number; // -30 to 30 (degrees) — rotates the framed shot
   vignette?: number; // 0-100 — darkened-edge intensity
   cropX?: number; // 0-100

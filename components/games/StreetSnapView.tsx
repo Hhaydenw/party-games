@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { CameraState, StreetSnapAction, StreetSnapView as ViewType } from "@/lib/games/streetSnap";
 import { PlayerInfo } from "@/lib/types";
 import { playSound } from "@/lib/sound";
@@ -33,18 +33,18 @@ async function loadStreetView(apiKey: string): Promise<{ StreetViewPanorama: typ
 // level), close enough for a voting-display image that doesn't need to
 // pixel-match the interactive view exactly.
 //
-// Capped at 100 rather than the Static API's real 120 max — that's the
-// actual "fisheye" complaint: at very wide FOV, the Static API's flat
-// perspective projection visibly bulges/stretches near the edges (an
-// inherent property of rendering a wide field of view as a flat
-// rectilinear image, not a bug in this app's code, but still bad enough
-// wide to look broken). Reaching a wide fov means zooming out a lot live
-// in the panorama; the crop slider below can zoom back in on the flat
-// rendered image afterward without reintroducing any distortion, so
-// capping the *captured* fov here doesn't cost any real framing
-// flexibility.
+// Capped at 80 (down from Google's real 120 max, and down again from an
+// earlier 100 cap that still wasn't tight enough) — that's the actual
+// "fisheye" complaint: at wide FOV, the Static API's flat perspective
+// projection visibly bulges/stretches near the edges (an inherent property
+// of rendering a wide field of view as a flat rectilinear image, not a bug
+// in this app's code, but still bad enough wide to look broken). Reaching
+// a wide fov means zooming out a lot live in the panorama; the crop slider
+// below can zoom back in on the flat rendered image afterward without
+// reintroducing any distortion, so capping the *captured* fov here doesn't
+// cost much real framing flexibility.
 function zoomToFov(zoom: number): number {
-  return Math.round(Math.max(10, Math.min(100, 180 / Math.pow(2, zoom))));
+  return Math.round(Math.max(10, Math.min(80, 180 / Math.pow(2, zoom))));
 }
 
 function buildStaticStreetViewUrl(apiKey: string, camera: CameraState): string {
@@ -80,28 +80,38 @@ const FILTER_PRESETS = [
   { id: "noir", label: "Noir", css: "grayscale(1) contrast(1.4) brightness(0.9)" },
 ] as const;
 
-type EditFields = { filter?: string; brightness?: number; contrast?: number; saturation?: number; bw?: number; blur?: number };
+type EditFields = {
+  filter?: string;
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  bwCurveOn?: boolean;
+  curveLow?: number;
+  curveHigh?: number;
+  blur?: number;
+  focusX?: number;
+  focusY?: number;
+  cropX?: number;
+  cropY?: number;
+  cropScale?: number;
+  tilt?: number;
+  vignette?: number;
+};
 
-// Combines the chosen filter preset with the fine-tune slider adjustments
-// into one CSS `filter` value — the preset (if any) supplies a baseline
-// look, and the sliders layer additional adjustment functions on top,
-// which is exactly how chained CSS filter functions are meant to compose
-// (each one applies to the result of the last). `bw` is a continuous
-// black & white *intensity* (0-100%), not a fixed on/off preset — dialing
-// it up gradually desaturates toward true grayscale.
-function editCss(edit: EditFields): string {
+// The filter preset plus brightness/contrast/saturation, as one CSS
+// `filter` value — NOT blur or the B&W curve, which get applied
+// separately (see EditedPhoto below): blur needs to skip the "in focus"
+// region, and the curve goes through an SVG filter rather than a plain
+// CSS function.
+function baseEditCss(edit: EditFields): string {
   const preset = FILTER_PRESETS.find((f) => f.id === edit.filter)?.css ?? "";
   const parts: string[] = [preset];
   const brightness = edit.brightness ?? 100;
   const contrast = edit.contrast ?? 100;
   const saturation = edit.saturation ?? 100;
-  const bw = edit.bw ?? 0;
-  const blur = edit.blur ?? 0;
   if (brightness !== 100) parts.push(`brightness(${brightness / 100})`);
   if (contrast !== 100) parts.push(`contrast(${contrast / 100})`);
   if (saturation !== 100) parts.push(`saturate(${saturation / 100})`);
-  if (bw > 0) parts.push(`grayscale(${bw / 100})`);
-  if (blur > 0) parts.push(`blur(${blur}px)`);
   return parts.filter(Boolean).join(" ");
 }
 // Crop (pan/zoom) and tilt (rotation) composed into one transform — order
@@ -117,7 +127,7 @@ function cropTransform(camera: { cropX?: number; cropY?: number; cropScale?: num
 }
 // A vignette can't go through the `filter` property — it's an inset
 // shadow on the image's own container instead, darkening in from the
-// edges. Kept as a separate style property (not merged into editCss)
+// edges. Kept as a separate style property (not merged into baseEditCss)
 // since it's box-shadow, not filter.
 function vignetteShadow(vignette?: number): string | undefined {
   const v = vignette ?? 0;
@@ -125,6 +135,120 @@ function vignetteShadow(vignette?: number): string | undefined {
   const spread = 20 + v * 0.6;
   const blurPx = 40 + v * 1.2;
   return `inset 0 0 ${blurPx}px ${spread}px rgba(0,0,0,${(v / 100) * 0.85})`;
+}
+
+// A real tone curve — 4 control points (fixed black/white endpoints at
+// (0,0)/(255,255) plus 2 draggable midtone points at fixed x=85/x=170,
+// only their output y is adjustable), piecewise-linearly interpolated and
+// sampled into the table SVG's <feFuncR/G/B type="table"> expects. This is
+// what actually lets someone reshape a B&W conversion's tonal response
+// (crush shadows, blow out highlights, an S-curve for punch, ...) instead
+// of just a flat "how much grayscale" slider.
+function curveTableValues(low: number, high: number, steps = 16): string {
+  const points: [number, number][] = [
+    [0, 0],
+    [85, low],
+    [170, high],
+    [255, 255],
+  ];
+  const values: number[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const x = (255 * i) / steps;
+    let y = 255;
+    for (let s = 0; s < points.length - 1; s++) {
+      const [x0, y0] = points[s]!;
+      const [x1, y1] = points[s + 1]!;
+      if (x >= x0 && x <= x1) {
+        const t = x1 === x0 ? 0 : (x - x0) / (x1 - x0);
+        y = y0 + t * (y1 - y0);
+        break;
+      }
+    }
+    values.push(Math.max(0, Math.min(1, y / 255)));
+  }
+  return values.map((v) => v.toFixed(3)).join(" ");
+}
+
+// Every displayed photo gets a tiny hidden per-instance SVG <filter>,
+// referenced from the actual <img> via `filter: url(#id) ...` alongside
+// the plain CSS filter functions from baseEditCss (SVG filter references
+// and CSS filter functions chain together fine in one `filter` value).
+// Two things live in it:
+//  - A mild sharpen convolution, always present. The Static API caps
+//    images at 640x640 regardless of how large they're actually displayed
+//    (see buildStaticStreetViewUrl) — upscaled past that on any
+//    higher-DPI/Retina screen (trivially easy), it looks soft. This
+//    counteracts that.
+//  - The B&W tone curve (desaturate via feColorMatrix, then remap via
+//    feComponentTransfer), only when bwCurveOn is set.
+function SnapSvgFilters({ id, bwCurveOn, curveLow, curveHigh }: { id: string; bwCurveOn?: boolean; curveLow?: number; curveHigh?: number }) {
+  const table = curveTableValues(curveLow ?? 85, curveHigh ?? 170);
+  return (
+    <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
+      <defs>
+        <filter id={id} colorInterpolationFilters="sRGB">
+          {bwCurveOn && (
+            <>
+              <feColorMatrix type="matrix" values="0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0.299 0.587 0.114 0 0  0 0 0 1 0" />
+              <feComponentTransfer>
+                <feFuncR type="table" tableValues={table} />
+                <feFuncG type="table" tableValues={table} />
+                <feFuncB type="table" tableValues={table} />
+              </feComponentTransfer>
+            </>
+          )}
+          <feConvolveMatrix order={3} kernelMatrix="0 -1 0 -1 5 -1 0 -1 0" divisor={1} preserveAlpha="true" />
+        </filter>
+      </defs>
+    </svg>
+  );
+}
+
+// Renders a photo with every edit applied — filter/curve/crop/tilt/
+// vignette, plus a genuinely *selective* blur rather than blurring the
+// whole frame. True depth-of-field isn't something a single CSS filter can
+// do, but stacking two copies of the same image (one sharp, one blurred)
+// and masking the blurred one with a radial gradient centered on the
+// chosen focus point — transparent there (revealing the sharp copy
+// beneath), opaque everywhere else — gets a convincing version of it with
+// nothing but CSS. Used identically in review, the voting/results grid,
+// and the lightbox, so what's tuned in review is exactly what everyone
+// else sees.
+function EditedPhoto({ src, alt, camera, imgClassName, onLoad }: { src: string; alt: string; camera: EditFields; imgClassName: string; onLoad?: () => void }) {
+  const rawId = useId();
+  const filterId = `ssfx-${rawId.replace(/[^a-zA-Z0-9]/g, "")}`;
+  const transform = cropTransform(camera);
+  const boxShadow = vignetteShadow(camera.vignette);
+  const base = baseEditCss(camera);
+  const curveUrl = `url(#${filterId})`;
+  const blurAmt = camera.blur ?? 0;
+  const focusX = camera.focusX ?? 50;
+  const focusY = camera.focusY ?? 50;
+  const sharpFilter = [curveUrl, base].filter(Boolean).join(" ");
+
+  return (
+    <>
+      <SnapSvgFilters id={filterId} bwCurveOn={camera.bwCurveOn} curveLow={camera.curveLow} curveHigh={camera.curveHigh} />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt} draggable={false} className={imgClassName} style={{ filter: sharpFilter, transform, boxShadow }} onLoad={onLoad} />
+      {blurAmt > 0 && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt=""
+          draggable={false}
+          className={imgClassName}
+          style={{
+            filter: [curveUrl, base, `blur(${blurAmt}px)`].filter(Boolean).join(" "),
+            transform,
+            boxShadow,
+            WebkitMaskImage: `radial-gradient(circle at ${focusX}% ${focusY}%, transparent 0%, transparent 12%, black 42%, black 100%)`,
+            maskImage: `radial-gradient(circle at ${focusX}% ${focusY}%, transparent 0%, transparent 12%, black 42%, black 100%)`,
+          }}
+        />
+      )}
+    </>
+  );
 }
 
 // A real top-level component (not declared inside ExploringPanel's render
@@ -137,6 +261,7 @@ function EditSlider({
   min = 0,
   max = 200,
   unit = "%",
+  resetTo,
   onChange,
 }: {
   label: string;
@@ -144,10 +269,11 @@ function EditSlider({
   min?: number;
   max?: number;
   unit?: string;
+  resetTo: number; // double-click the slider to snap back to this
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 text-xs text-slate-400">
+    <label className="flex items-center gap-2 text-xs text-slate-400" title={`Double-click the slider to reset to ${resetTo}${unit}`}>
       <span className="w-20 shrink-0 text-left">{label}</span>
       <input
         type="range"
@@ -155,6 +281,7 @@ function EditSlider({
         max={max}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
+        onDoubleClick={() => onChange(resetTo)}
         className="flex-1 accent-accent"
       />
       <span className="w-11 shrink-0 text-right font-mono">
@@ -162,6 +289,83 @@ function EditSlider({
         {unit}
       </span>
     </label>
+  );
+}
+
+// A Photoshop-Curves-style editor: a square grid, the reference diagonal,
+// the actual curve (piecewise-linear through the fixed endpoints and the 2
+// draggable midtone points), and two draggable handles. Deliberately
+// vertical-only dragging at fixed x-positions (thirds) rather than fully
+// free placement — still a real curve (can shape an S-curve, crush
+// shadows, blow highlights, ...), but avoids the extra complexity of
+// points crossing each other or needing to be kept in x-order.
+const CURVE_SIZE = 180;
+function CurveEditor({ low, high, onChange }: { low: number; high: number; onChange: (low: number, high: number) => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef<"low" | "high" | null>(null);
+
+  function yToPixel(y: number) {
+    return CURVE_SIZE - (y / 255) * CURVE_SIZE;
+  }
+  function pixelToY(py: number) {
+    return Math.max(0, Math.min(255, Math.round(((CURVE_SIZE - py) / CURVE_SIZE) * 255)));
+  }
+  function handleMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!draggingRef.current || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const y = pixelToY(e.clientY - rect.top);
+    if (draggingRef.current === "low") onChange(y, high);
+    else onChange(low, y);
+  }
+  function startDrag(which: "low" | "high") {
+    return (e: React.PointerEvent) => {
+      draggingRef.current = which;
+      (e.target as Element).setPointerCapture(e.pointerId);
+    };
+  }
+  function endDrag() {
+    draggingRef.current = null;
+  }
+
+  const lowX = (85 / 255) * CURVE_SIZE;
+  const lowY = yToPixel(low);
+  const highX = (170 / 255) * CURVE_SIZE;
+  const highY = yToPixel(high);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative touch-none self-center rounded-lg border border-white/15 bg-black/40"
+      style={{ width: CURVE_SIZE, height: CURVE_SIZE }}
+      onPointerMove={handleMove}
+      onPointerUp={endDrag}
+      onPointerLeave={endDrag}
+    >
+      <svg width={CURVE_SIZE} height={CURVE_SIZE} className="absolute inset-0">
+        {[1, 2, 3].map((i) => (
+          <line key={`v${i}`} x1={(CURVE_SIZE / 4) * i} y1={0} x2={(CURVE_SIZE / 4) * i} y2={CURVE_SIZE} stroke="rgba(255,255,255,0.1)" />
+        ))}
+        {[1, 2, 3].map((i) => (
+          <line key={`h${i}`} x1={0} y1={(CURVE_SIZE / 4) * i} x2={CURVE_SIZE} y2={(CURVE_SIZE / 4) * i} stroke="rgba(255,255,255,0.1)" />
+        ))}
+        <line x1={0} y1={CURVE_SIZE} x2={CURVE_SIZE} y2={0} stroke="rgba(255,255,255,0.15)" strokeDasharray="3 3" />
+        <polyline points={`0,${CURVE_SIZE} ${lowX},${lowY} ${highX},${highY} ${CURVE_SIZE},0`} fill="none" stroke="#f2b705" strokeWidth={2} />
+      </svg>
+      <div
+        className="absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-ink bg-gold active:cursor-grabbing"
+        style={{ left: lowX, top: lowY }}
+        onPointerDown={startDrag("low")}
+        onDoubleClick={() => onChange(85, high)}
+        title="Shadows/lower-midtones — double-click to reset"
+      />
+      <div
+        className="absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-ink bg-gold active:cursor-grabbing"
+        style={{ left: highX, top: highY }}
+        onPointerDown={startDrag("high")}
+        onDoubleClick={() => onChange(low, 170)}
+        title="Highlights/upper-midtones — double-click to reset"
+      />
+    </div>
   );
 }
 
@@ -388,24 +592,44 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
   const [brightness, setBrightness] = useState(100);
   const [contrast, setContrast] = useState(100);
   const [saturation, setSaturation] = useState(100);
-  const [bw, setBw] = useState(0);
+  const [bwCurveOn, setBwCurveOn] = useState(false);
+  const [curveLow, setCurveLow] = useState(85);
+  const [curveHigh, setCurveHigh] = useState(170);
   const [blur, setBlur] = useState(0);
+  const [focusPos, setFocusPos] = useState({ x: 50, y: 50 });
   const [tilt, setTilt] = useState(0);
   const [vignette, setVignette] = useState(0);
   const [cropPos, setCropPos] = useState({ x: 50, y: 50 });
   const [cropScale, setCropScale] = useState(1);
   const pendingRef = useRef<CameraState | null>(null);
   pendingRef.current = pendingCamera;
-  const editRef = useRef({ filterId, brightness, contrast, saturation, bw, blur, tilt, vignette, cropPos, cropScale });
-  editRef.current = { filterId, brightness, contrast, saturation, bw, blur, tilt, vignette, cropPos, cropScale };
+  const editRef = useRef({
+    filterId,
+    brightness,
+    contrast,
+    saturation,
+    bwCurveOn,
+    curveLow,
+    curveHigh,
+    blur,
+    focusPos,
+    tilt,
+    vignette,
+    cropPos,
+    cropScale,
+  });
+  editRef.current = { filterId, brightness, contrast, saturation, bwCurveOn, curveLow, curveHigh, blur, focusPos, tilt, vignette, cropPos, cropScale };
 
   function resetEdits() {
     setFilterId("none");
     setBrightness(100);
     setContrast(100);
     setSaturation(100);
-    setBw(0);
+    setBwCurveOn(false);
+    setCurveLow(85);
+    setCurveHigh(170);
     setBlur(0);
+    setFocusPos({ x: 50, y: 50 });
     setTilt(0);
     setVignette(0);
     setCropPos({ x: 50, y: 50 });
@@ -443,7 +667,24 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
     playSound("select");
     onAction({
       type: "submitPhoto",
-      camera: { ...pendingCamera, filter: filterId, brightness, contrast, saturation, bw, blur, tilt, vignette, cropX: cropPos.x, cropY: cropPos.y, cropScale },
+      camera: {
+        ...pendingCamera,
+        filter: filterId,
+        brightness,
+        contrast,
+        saturation,
+        bwCurveOn,
+        curveLow,
+        curveHigh,
+        blur,
+        focusX: focusPos.x,
+        focusY: focusPos.y,
+        tilt,
+        vignette,
+        cropX: cropPos.x,
+        cropY: cropPos.y,
+        cropScale,
+      },
     });
     setPendingCamera(null);
   }
@@ -498,11 +739,27 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
       if (submittedRef.current || autoSubmitted.current) return;
       autoSubmitted.current = true;
       const base = pendingRef.current ?? captureCurrentCamera();
-      const { filterId: f, brightness: b, contrast: c2, saturation: s2, bw: bw2, blur: blur2, tilt: tilt2, vignette: vig2, cropPos: c, cropScale: s } =
-        editRef.current;
+      const e = editRef.current;
       onAction({
         type: "submitPhoto",
-        camera: { ...base, filter: f, brightness: b, contrast: c2, saturation: s2, bw: bw2, blur: blur2, tilt: tilt2, vignette: vig2, cropX: c.x, cropY: c.y, cropScale: s },
+        camera: {
+          ...base,
+          filter: e.filterId,
+          brightness: e.brightness,
+          contrast: e.contrast,
+          saturation: e.saturation,
+          bwCurveOn: e.bwCurveOn,
+          curveLow: e.curveLow,
+          curveHigh: e.curveHigh,
+          blur: e.blur,
+          focusX: e.focusPos.x,
+          focusY: e.focusPos.y,
+          tilt: e.tilt,
+          vignette: e.vignette,
+          cropX: e.cropPos.x,
+          cropY: e.cropPos.y,
+          cropScale: e.cropScale,
+        },
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, msLeft);
@@ -587,23 +844,27 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
         {showReview && pendingCamera && (
           <div
             className="absolute inset-0 z-[999] bg-black"
-            style={{ cursor: cropScale > 1 ? "grab" : "default" }}
+            style={{ cursor: blur > 0 ? "crosshair" : cropScale > 1 ? "grab" : "default" }}
             onPointerDown={startDrag}
             onPointerMove={onDrag}
             onPointerUp={endDrag}
             onPointerLeave={endDrag}
+            onClick={(e) => {
+              // Click to set the in-focus point — only meaningful once
+              // there's actually a blur to leave a hole in.
+              if (blur <= 0) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              setFocusPos({
+                x: Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100)),
+                y: Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100)),
+              });
+            }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <EditedPhoto
               src={buildStaticStreetViewUrl(view.mapsApiKey, pendingCamera)}
               alt="Your photo"
-              draggable={false}
-              className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
-              style={{
-                filter: editCss({ filter: filterId, brightness, contrast, saturation, bw, blur }),
-                transform: cropTransform({ cropX: cropPos.x, cropY: cropPos.y, cropScale, tilt }),
-                boxShadow: vignetteShadow(vignette),
-              }}
+              camera={{ filter: filterId, brightness, contrast, saturation, bwCurveOn, curveLow, curveHigh, blur, focusX: focusPos.x, focusY: focusPos.y, cropX: cropPos.x, cropY: cropPos.y, cropScale, tilt, vignette }}
+              imgClassName="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
             />
             {/* Rule-of-thirds grid — only useful (and only shown) once
                 there's actually room to reposition, i.e. zoomed in past
@@ -614,6 +875,13 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
                   <div key={i} className="border border-white/25" />
                 ))}
               </div>
+            )}
+            {/* Marks where the blur currently leaves things in focus. */}
+            {blur > 0 && (
+              <div
+                className="pointer-events-none absolute h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-gold/90 shadow-[0_0_0_2000px_rgba(0,0,0,0.15)]"
+                style={{ left: `${focusPos.x}%`, top: `${focusPos.y}%` }}
+              />
             )}
           </div>
         )}
@@ -668,21 +936,36 @@ function ExploringPanel({ view, onAction }: { view: ViewType; onAction: (action:
               above — same live-CSS approach as everything else here, never
               baked into an exported image. */}
           <div className="flex w-full max-w-xs flex-col gap-1.5">
-            <EditSlider label="☀️ Brightness" value={brightness} onChange={setBrightness} />
-            <EditSlider label="◐ Contrast" value={contrast} onChange={setContrast} />
-            <EditSlider label="🎨 Saturation" value={saturation} onChange={setSaturation} />
-            <EditSlider label="⚫ B&W" value={bw} max={100} onChange={setBw} />
-            <EditSlider label="🌫️ Focus blur" value={blur} max={8} unit="px" onChange={setBlur} />
-            <EditSlider label="📐 Tilt" value={tilt} min={-30} max={30} unit="°" onChange={setTilt} />
-            <EditSlider label="🖤 Vignette" value={vignette} max={100} onChange={setVignette} />
-            {(brightness !== 100 || contrast !== 100 || saturation !== 100 || bw !== 0 || blur !== 0 || tilt !== 0 || vignette !== 0) && (
+            <EditSlider label="☀️ Brightness" value={brightness} resetTo={100} onChange={setBrightness} />
+            <EditSlider label="◐ Contrast" value={contrast} resetTo={100} onChange={setContrast} />
+            <EditSlider label="🎨 Saturation" value={saturation} resetTo={100} onChange={setSaturation} />
+            <EditSlider label="🌫️ Focus blur" value={blur} max={8} unit="px" resetTo={0} onChange={setBlur} />
+            {blur > 0 && (
+              <p className="-mt-1 text-center text-[11px] text-slate-500">Tap the photo above to move the in-focus spot.</p>
+            )}
+            <EditSlider label="📐 Tilt" value={tilt} min={-30} max={30} unit="°" resetTo={0} onChange={setTilt} />
+            <EditSlider label="🖤 Vignette" value={vignette} max={100} resetTo={0} onChange={setVignette} />
+            <div className="flex flex-col items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 p-2">
+              <button
+                onClick={() => setBwCurveOn((on) => !on)}
+                className={`w-full rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  bwCurveOn ? "bg-gold text-ink" : "bg-white/10 text-slate-300 hover:bg-white/20"
+                }`}
+              >
+                ⚫ Black &amp; white curve {bwCurveOn ? "on" : "off"}
+              </button>
+              {bwCurveOn && <CurveEditor low={curveLow} high={curveHigh} onChange={(lo, hi) => { setCurveLow(lo); setCurveHigh(hi); }} />}
+            </div>
+            {(brightness !== 100 || contrast !== 100 || saturation !== 100 || bwCurveOn || blur !== 0 || tilt !== 0 || vignette !== 0) && (
               <button
                 className="self-center text-xs text-slate-500 underline hover:text-slate-300"
                 onClick={() => {
                   setBrightness(100);
                   setContrast(100);
                   setSaturation(100);
-                  setBw(0);
+                  setBwCurveOn(false);
+                  setCurveLow(85);
+                  setCurveHigh(170);
                   setBlur(0);
                   setTilt(0);
                   setVignette(0);
@@ -817,12 +1100,11 @@ function PhotoTile({
         title="Click to enlarge"
       >
         {camera && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <EditedPhoto
             src={buildStaticStreetViewUrl(apiKey, camera)}
             alt={`Photo by ${label}`}
-            className="absolute inset-0 h-full w-full object-cover"
-            style={{ filter: editCss(camera), transform: cropTransform(camera), boxShadow: vignetteShadow(camera.vignette) }}
+            camera={camera}
+            imgClassName="absolute inset-0 h-full w-full object-cover"
             onLoad={() => setLoaded(true)}
           />
         )}
@@ -862,13 +1144,12 @@ function PhotoLightbox({ apiKey, camera, label, onClose }: { apiKey: string; cam
         >
           ✕ Close
         </button>
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+        <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
+          <EditedPhoto
             src={buildStaticStreetViewUrl(apiKey, camera)}
             alt={`Photo by ${label}`}
-            className="block h-auto w-full"
-            style={{ filter: editCss(camera), transform: cropTransform(camera), boxShadow: vignetteShadow(camera.vignette) }}
+            camera={camera}
+            imgClassName="absolute inset-0 h-full w-full object-cover"
           />
         </div>
         <p className="mt-2 text-center text-sm text-slate-300">{label}</p>
