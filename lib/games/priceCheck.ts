@@ -41,12 +41,15 @@ interface DummyProduct {
   price: number;
   thumbnail?: string;
   description?: string;
+  weight?: number;
+  dimensions?: { width: number; height: number; depth: number };
 }
 
 export interface ProductInfo {
   id: number;
   title: string;
   brand: string;
+  hasBrand: boolean; // false when brand had to fall back to the category name
   category: string;
   price: number;
   thumbnail: string | null;
@@ -54,7 +57,18 @@ export interface ProductInfo {
   // there's more to go on than just a often-generic product name (e.g.
   // "Blue T-Shirt") when guessing.
   description: string | null;
+  // Roughly half of dummyjson's catalog (mostly groceries/home goods) has
+  // no real brand at all, and the source has no clothing/shoe "size" field
+  // whatsoever — so as an extra clue on those harder-to-guess products,
+  // fall back to physical size: dimensions (cm) and weight (g).
+  dimensions: { width: number; height: number; depth: number } | null;
+  weight: number | null;
 }
+
+// dummyjson.com is a single mock catalog, not a multi-retailer feed — every
+// product in this game comes from the same source, shown here so it's
+// clear this isn't meant to represent any specific real store's pricing.
+export const PRODUCT_SOURCE_LABEL = "DummyJSON Marketplace (mock catalog)";
 
 async function fetchProducts(category: string): Promise<ProductInfo[]> {
   // limit=0 asks dummyjson for its *entire* catalog rather than a capped
@@ -62,10 +76,11 @@ async function fetchProducts(category: string): Promise<ProductInfo[]> {
   // directly against the live API), so there's no real pool bigger than
   // "everything they have" to fetch; this at least guarantees nothing in
   // it gets missed by an arbitrary limit.
+  const fields = "id,title,brand,category,price,thumbnail,description,weight,dimensions";
   const url =
     category === "all"
-      ? "https://dummyjson.com/products?limit=0&select=id,title,brand,category,price,thumbnail,description"
-      : `https://dummyjson.com/products/category/${encodeURIComponent(category)}?limit=0&select=id,title,brand,category,price,thumbnail,description`;
+      ? `https://dummyjson.com/products?limit=0&select=${fields}`
+      : `https://dummyjson.com/products/category/${encodeURIComponent(category)}?limit=0&select=${fields}`;
   try {
     const res = await fetch(url);
     if (!res.ok) return [];
@@ -76,10 +91,13 @@ async function fetchProducts(category: string): Promise<ProductInfo[]> {
         id: p.id,
         title: p.title,
         brand: p.brand ?? p.category,
+        hasBrand: !!p.brand,
         category: p.category,
         price: Math.round(p.price * 100) / 100,
         thumbnail: p.thumbnail ?? null,
         description: p.description ?? null,
+        dimensions: p.dimensions ?? null,
+        weight: p.weight ?? null,
       }));
   } catch {
     return [];
@@ -145,9 +163,13 @@ export interface PriceCheckView {
   totalRounds: number;
   title: string;
   brand: string;
+  hasBrand: boolean;
   category: string;
   thumbnail: string | null;
   description: string | null;
+  dimensions: { width: number; height: number; depth: number } | null;
+  weight: number | null;
+  source: string;
   phase: PriceCheckPhase;
   yourGuess: number | null;
   guessedCount: number;
@@ -254,9 +276,13 @@ export const priceCheck: GameDefinition<PriceCheckState, PriceCheckView, PriceCh
       totalRounds: state.totalRounds,
       title: state.product.title,
       brand: state.product.brand,
+      hasBrand: state.product.hasBrand,
       category: state.product.category,
       thumbnail: state.product.thumbnail,
       description: state.product.description,
+      dimensions: state.product.dimensions,
+      weight: state.product.weight,
+      source: PRODUCT_SOURCE_LABEL,
       phase: state.phase,
       yourGuess: state.guesses[playerId]?.amount ?? null,
       guessedCount: Object.keys(state.guesses).length,

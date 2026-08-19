@@ -76,6 +76,9 @@ export default function PriceCheckView({
       <p className="text-xs uppercase tracking-widest text-slate-500">
         Round {view.roundIndex + 1} of {view.totalRounds}
       </p>
+      <p className="-mt-4 text-[11px] text-slate-600" title="Every product in this game comes from the same mock catalog, not a real store's live pricing.">
+        🏪 {view.source}
+      </p>
 
       {/* Product card — a price-tag-style presentation: photo up top, a
           countdown bar along the bottom edge instead of plain text, and
@@ -89,10 +92,20 @@ export default function PriceCheckView({
           </div>
         )}
         <p className="text-xs uppercase tracking-widest text-slate-500">
-          {view.brand} · {view.category}
+          {view.hasBrand ? view.brand : `${view.category} (no listed brand)`} · {view.category}
         </p>
         <h2 className="text-center text-lg font-bold leading-tight">{view.title}</h2>
         {view.description && <p className="max-w-sm text-center text-xs text-slate-500">{view.description}</p>}
+        {/* dummyjson has no clothing/shoe "size" field at all, and about
+            half its catalog has no real brand — dimensions/weight are the
+            best substitute clue available on those harder-to-guess items. */}
+        {(view.dimensions || view.weight) && (
+          <p className="text-[11px] text-slate-600">
+            {view.dimensions && `${view.dimensions.width} × ${view.dimensions.height} × ${view.dimensions.depth} cm`}
+            {view.dimensions && view.weight ? " · " : ""}
+            {view.weight && `${view.weight}g`}
+          </p>
+        )}
         {revealed ? (
           <p className="text-3xl font-black text-gold [animation:feud-pop_0.4s_ease-out]">{money(view.revealedPrice!)}</p>
         ) : (
