@@ -370,7 +370,7 @@ function isFullyRevealed(phrase: string, guessedLetters: string[]): boolean {
     .every((c) => letters.has(c));
 }
 
-export type LuckySpinPhase = "playing" | "roundEnd" | "finished";
+export type LuckySpinPhase = "orderSpin" | "playing" | "roundEnd" | "finished";
 
 export interface LuckySpinState {
   hostId: PlayerId;
@@ -385,6 +385,11 @@ export interface LuckySpinState {
   roundEarnings: Record<PlayerId, number>;
   totalScores: Record<PlayerId, number>;
   phase: LuckySpinPhase;
+  // A one-time spin-off, before round 1, to decide turn order — everyone
+  // spins once and the highest value goes first. playerId -> the precise
+  // (sub-integer) value they rolled, so ties are effectively impossible
+  // when sorting even though the displayed number is a rounded 1-100.
+  orderSpinValues: Record<PlayerId, number>;
   currentSegmentValue: number | null;
   lastSpinResult: WheelSegment | null;
   lastSpinIndex: number | null;
@@ -404,6 +409,8 @@ export interface LuckySpinView {
   order: PlayerId[];
   currentPlayerId: PlayerId;
   yourTurn: boolean;
+  orderSpinValues: { playerId: PlayerId; value: number }[]; // rounded for display
+  orderSpinDone: boolean; // have you already spun for order?
   roundIndex: number;
   totalRounds: number;
   category: string;
@@ -424,6 +431,7 @@ export interface LuckySpinView {
 }
 
 export type LuckySpinAction =
+  | { type: "spinForOrder" }
   | { type: "spin" }
   | { type: "guessConsonant"; letter: string }
   | { type: "buyVowel"; letter: string }
@@ -492,7 +500,8 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       guessedLetters: [],
       roundEarnings: {},
       totalScores,
-      phase: "playing",
+      phase: "orderSpin",
+      orderSpinValues: {},
       currentSegmentValue: null,
       lastSpinResult: null,
       lastSpinIndex: null,
@@ -501,10 +510,28 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       roundLog: [],
       lastRoundResult: null,
     };
-    return startRound(base, 0);
+    return base;
   },
   applyAction(state, playerId, action) {
     if (state.phase === "finished") throw new GameActionError("Game is already over.");
+
+    if (action.type === "spinForOrder") {
+      if (state.phase !== "orderSpin") throw new GameActionError("Turn order is already set.");
+      if (!state.playerIds.includes(playerId)) throw new GameActionError("Unknown player.");
+      if (playerId in state.orderSpinValues) throw new GameActionError("You've already spun for turn order.");
+      const value = Math.random() * 100;
+      const orderSpinValues = { ...state.orderSpinValues, [playerId]: value };
+      const allDone = state.playerIds.every((id) => id in orderSpinValues);
+      if (!allDone) {
+        return { ...state, orderSpinValues };
+      }
+      // Highest value goes first, then play proceeds in that same order —
+      // just a fixed re-ranking of playerIds, not a rotating "next turn"
+      // pick, so the rest of the game's turnIndex-based logic is untouched.
+      const order = [...state.playerIds].sort((a, b) => (orderSpinValues[b] ?? 0) - (orderSpinValues[a] ?? 0));
+      return startRound({ ...state, orderSpinValues, order, turnIndex: 0 }, 0);
+    }
+
     const currentPlayerId = state.order[state.turnIndex]!;
 
     if (action.type === "spin") {
@@ -641,6 +668,10 @@ export const luckySpin: GameDefinition<LuckySpinState, LuckySpinView, LuckySpinA
       order: state.order,
       currentPlayerId,
       yourTurn: currentPlayerId === playerId && state.phase === "playing",
+      orderSpinValues: state.playerIds
+        .filter((pid) => pid in state.orderSpinValues)
+        .map((pid) => ({ playerId: pid, value: Math.round(state.orderSpinValues[pid]!) })),
+      orderSpinDone: playerId in state.orderSpinValues,
       roundIndex: state.roundIndex,
       totalRounds: state.totalRounds,
       category: state.category,

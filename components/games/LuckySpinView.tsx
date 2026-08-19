@@ -190,6 +190,64 @@ export default function LuckySpinView({
     setSolveDraft("");
   }
 
+  // Alerts you the moment it becomes your turn — including the very first
+  // turn of the game, decided by the order-spin below — so you don't have
+  // to be staring at the screen to notice. Same wasMyTurn-ref pattern used
+  // by Monopoly/Uno: only fires on the false -> true transition, not on
+  // every render while it's already your turn.
+  const wasMyTurn = useRef(view.yourTurn);
+  useEffect(() => {
+    if (view.yourTurn && !wasMyTurn.current) playSound("turn");
+    wasMyTurn.current = view.yourTurn;
+  }, [view.yourTurn]);
+
+  if (view.phase === "orderSpin") {
+    const youSpun = view.orderSpinValues.find((v) => v.playerId === meId);
+    const ranked = [...view.orderSpinValues].sort((a, b) => b.value - a.value);
+    return (
+      <div className="flex flex-col items-center gap-6 py-8">
+        <div className="text-center">
+          <p className="text-lg font-bold">Spin to see who goes first!</p>
+          <p className="mt-1 text-sm text-slate-400">Everyone spins once — highest number goes first.</p>
+        </div>
+        <div
+          key={youSpun ? "spun" : "unspun"}
+          className={`flex h-32 w-32 items-center justify-center rounded-full border-4 border-gold/60 bg-white/5 text-4xl font-black text-gold shadow-lg ${
+            youSpun ? "[animation:feud-pop_0.4s_ease-out]" : ""
+          }`}
+        >
+          {youSpun ? youSpun.value : "?"}
+        </div>
+        {youSpun ? (
+          <p className="text-sm text-slate-400">
+            You rolled <span className="font-bold text-gold">{youSpun.value}</span>. Waiting on{" "}
+            {view.orderSpinValues.length}/{players.length} players…
+          </p>
+        ) : (
+          <button
+            className="btn-gold text-lg"
+            onClick={() => {
+              playSound("click");
+              onAction({ type: "spinForOrder" });
+            }}
+          >
+            🎡 Spin for turn order
+          </button>
+        )}
+        {ranked.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-2 text-sm">
+            {ranked.map((v, i) => (
+              <span key={v.playerId} className="rounded-xl bg-white/5 px-3 py-1.5 font-semibold">
+                {i === 0 ? "🥇 " : ""}
+                {nameFor(v.playerId)}: {v.value}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="grid w-full gap-6 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-start">
     <div className="flex flex-col items-center gap-6">
