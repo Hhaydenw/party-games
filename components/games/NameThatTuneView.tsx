@@ -51,22 +51,6 @@ export default function NameThatTuneView({
     });
   }, []);
 
-  // Whoever's audio metadata loads first reports the clip's *real*
-  // remaining play time (duration minus the skip-ahead offset below) back
-  // to the server, which uses it to correct the round's countdown/
-  // fallback deadline — previously that was a fixed 30s guess for every
-  // clip regardless of how long it actually was, so the visible timer
-  // could disagree with the song either direction (showing time left
-  // after a short clip already ended, or hitting zero and cutting off a
-  // longer one early). Guarded per round so a client whose audio fires
-  // loadedmetadata more than once (happens on some browsers) doesn't
-  // report repeatedly — the server only accepts the first report anyway,
-  // but no need to even try more than once.
-  const clipLengthReported = useRef(false);
-  useEffect(() => {
-    clipLengthReported.current = false;
-  }, [view.roundIndex]);
-
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || view.phase !== "guessing") return;
@@ -81,10 +65,6 @@ export default function NameThatTuneView({
       // into the clip.
       const offset = Number.isFinite(audio.duration) ? Math.min(8, audio.duration * 0.15) : 0;
       if (offset > 0) audio.currentTime = offset;
-      if (!clipLengthReported.current && Number.isFinite(audio.duration)) {
-        clipLengthReported.current = true;
-        onAction({ type: "setClipLength", ms: Math.round((audio.duration - offset) * 1000) });
-      }
       audio.play().catch(() => {
         // Autoplay was blocked; the visible play button on the record covers this case.
       });
@@ -96,7 +76,6 @@ export default function NameThatTuneView({
       cancelled = true;
       audio.removeEventListener("loadedmetadata", startAtHook);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.previewUrl, view.phase]);
 
   // The round ends when the clip actually finishes playing, so the guess
