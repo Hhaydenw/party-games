@@ -24,7 +24,6 @@ Sixteen games are fully implemented:
 | **Color Match** | 📱 Party | 2–12 |
 | **Street Snap** (photo-guessing, needs setup — see below) | 📱 Party | 2–8 |
 | **Tank Arena** | 📱 Party (real-time) | 2–8 |
-| **Paddle Battle** (Pong-style) | 📱 Party (real-time) | 2 |
 | **Monopoly** | 🎲 Board | 2–6 |
 
 **Series Mode**: instead of one game, the host can queue up several in a row
@@ -141,9 +140,8 @@ that room — so that info isn't lost, it just lives in the right place.
 
 The host can tune each round-based game before starting it — a **Settings** panel
 appears in the lobby once a game is picked (rounds; Trivia Night also gets
-category/difficulty; Name That Tune gets genre/decade; Tank Arena and Void
-Raiders get match length, Tank Arena also gets solo-vs-teams; Paddle Battle gets
-the winning score). Board games (Uno, Monopoly) don't have a settings
+category/difficulty; Name That Tune gets genre/decade; Tank Arena gets
+match length and solo-vs-teams). Board games (Uno, Monopoly) don't have a settings
 panel since they play to a win condition rather than N rounds.
 
 **Freshness**: every trivia/question/song-based game is designed not to repeat
@@ -224,10 +222,10 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   decade filter, so relevance comes from the query wording rather than
   certified chart data; a filter also screens out lullaby/karaoke/tribute-album
   covers that otherwise rank surprisingly high for generic "hits" searches.
-- **Tank Arena** and **Paddle Battle** are the real-time
-  games here — everyone else is turn-based. Both run on the server's
-  physics tick loop (see [How it's built](#how-its-built)) rather than
-  reacting only to discrete moves. Tank Arena is a Wii Play *Tanks!*-style
+- **Tank Arena** is the real-time game here — everyone else is
+  turn-based. It runs on the server's physics tick loop (see
+  [How it's built](#how-its-built)) rather than reacting only to discrete
+  moves. It's a Wii Play *Tanks!*-style
   maze battle (original map layout, not a copy of any specific commercial
   game's exact grid — see `lib/games/tanks.ts`): WASD to move, aim/shoot
   with the mouse, E to drop a mine, solo free-for-all or 2 teams. It plays
@@ -250,10 +248,7 @@ they only start reusing — they never *guarantee* a repeat within a normal nigh
   aren't available in Teams mode (team-balancing a mix of humans and bots
   adds complexity not worth it here), and a match a bot "wins" (highest
   kills) doesn't award anyone a session win in the lobby, since bots aren't
-  real room players. Paddle Battle: a two-player
-  Pong-style paddle-and-ball game, W/S or ↑/↓ to move, first to the target
-  score wins — ball speed ramps up with each rally and the bounce angle
-  depends on where it hits your paddle.
+  real room players.
 - **Wildest Answer** is an original Quiplash-style prompt-and-vote game (the
   prompts are written fresh for this app, not pulled from any commercial
   game — same approach as Family Feud's question bank). Each round, players
@@ -515,7 +510,7 @@ survive deploys/restarts, the next step would be swapping `lib/rooms.ts`'s in-me
 - **Real-time games**: a game can optionally implement `tick(state, dtMs)` and set
   `meta.tickIntervalMs`; `lib/rooms.ts` then runs that game's physics step on a
   timer (independent of player actions) and broadcasts whenever it changes state.
-  Tank Arena and Paddle Battle both use this — everything else
+  Tank Arena uses this — everything else
   reacts only to discrete player actions. Players stream continuous state
   (which keys are held, where the mouse is aiming) as regular actions; the
   tick loop is what actually moves things and resolves hits.

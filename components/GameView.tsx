@@ -8,7 +8,6 @@ import FamilyFeudView from "@/components/games/FamilyFeudView";
 import NameThatTuneView from "@/components/games/NameThatTuneView";
 import MonopolyView from "@/components/games/MonopolyView";
 import TanksView from "@/components/games/TanksView";
-import PaddleBattleView from "@/components/games/PaddleBattleView";
 import WildestAnswerView from "@/components/games/WildestAnswerView";
 import PriceCheckView from "@/components/games/PriceCheckView";
 import LuckySpinView from "@/components/games/LuckySpinView";
@@ -49,8 +48,6 @@ export default function GameView({
       return <MonopolyView view={view as any} onAction={onAction} meId={meId} players={players} />;
     case "tanks":
       return <TanksView view={view as any} onAction={onAction} meId={meId} players={players} />;
-    case "paddle-battle":
-      return <PaddleBattleView view={view as any} onAction={onAction} meId={meId} players={players} />;
     case "wildest-answer":
       return <WildestAnswerView view={view as any} onAction={onAction} meId={meId} players={players} />;
     case "price-check":

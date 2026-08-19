@@ -6,7 +6,6 @@ import { familyFeud } from "./familyFeud";
 import { nameThatTune } from "./nameThatTune";
 import { monopoly } from "./monopoly";
 import { tanks } from "./tanks";
-import { paddleBattle } from "./paddleBattle";
 import { wildestAnswer } from "./wildestAnswer";
 import { priceCheck } from "./priceCheck";
 import { luckySpin } from "./luckySpin";
@@ -27,7 +26,6 @@ export const GAMES: Record<string, GameDefinition<any, any, any>> = {
   [nameThatTune.meta.id]: nameThatTune,
   [monopoly.meta.id]: monopoly,
   [tanks.meta.id]: tanks,
-  [paddleBattle.meta.id]: paddleBattle,
   [wildestAnswer.meta.id]: wildestAnswer,
   [priceCheck.meta.id]: priceCheck,
   [luckySpin.meta.id]: luckySpin,
