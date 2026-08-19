@@ -1,4 +1,5 @@
 import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/types";
+import { racePoints } from "@/lib/games/scoring";
 
 // A Pictionary/skribbl.io-style game: one player draws a secret word on a
 // shared canvas, everyone else races to guess it in a chat-style feed.
@@ -307,7 +308,7 @@ export const drawing: GameDefinition<DrawingState, DrawingView, DrawingAction> =
 
       if (isCorrect) {
         const position = state.correctGuessers.length;
-        const points = position === 0 ? 3 : position === 1 ? 2 : 1;
+        const points = racePoints(position);
         next = {
           ...next,
           correctGuessers: [...state.correctGuessers, playerId],

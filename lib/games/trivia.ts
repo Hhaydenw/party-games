@@ -1,4 +1,5 @@
 import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/types";
+import { racePoints } from "@/lib/games/scoring";
 
 // A real multiple-choice trivia game, powered live by the free, keyless
 // Open Trivia Database (opentdb.com) — thousands of questions across
@@ -232,7 +233,7 @@ export const trivia: GameDefinition<TriviaState, TriviaView, TriviaAction> = {
       let scores = state.scores;
       if (correct) {
         const position = state.correctOrder.length;
-        const points = position === 0 ? 3 : position === 1 ? 2 : 1;
+        const points = racePoints(position);
         scores = { ...scores, [playerId]: (scores[playerId] ?? 0) + points };
       }
       const allAnswered = state.playerIds.every((pid) => answers[pid]);

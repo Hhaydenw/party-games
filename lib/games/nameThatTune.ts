@@ -1,5 +1,6 @@
 import { GameActionError, GameDefinition, GameOptions, PlayerId } from "@/lib/types";
 import { DECADE_CHOICES, GENRE_CHOICES, SongResult, searchSongs } from "./songSource";
+import { racePoints } from "@/lib/games/scoring";
 
 // A "name that tune" style game: the server searches Apple's free, keyless
 // iTunes Search API for real songs matching the chosen genre/decade (which
@@ -269,7 +270,7 @@ export const nameThatTune: GameDefinition<NameThatTuneState, NameThatTuneView, N
 
       if (correct) {
         const position = list.length;
-        const points = position === 0 ? 3 : position === 1 ? 2 : 1;
+        const points = racePoints(position);
         const updatedList = [...list, playerId];
         const otherList = action.field === "title" ? state.correctArtistGuessers : state.correctTitleGuessers;
         // Getting the *second* field right (in either order) is a bonus —
